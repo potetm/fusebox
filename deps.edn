@@ -1,0 +1,15 @@
+{:paths ["src/clojure"]
+
+ :deps {org.clojure/clojure {:mvn/version "1.10.1"}
+        org.clojure/tools.logging {:mvn/version "0.6.0"}}
+
+ :aliases {:dev {:extra-paths ["dev" "dev-resources"]
+                 :extra-deps {nrepl/nrepl {:mvn/version "0.6.0"}
+
+                              ;; Java's crazy logging
+                              org.slf4j/slf4j-api {:mvn/version "1.7.30"}
+                              org.slf4j/log4j-over-slf4j {:mvn/version "1.7.30"}
+                              ch.qos.logback/logback-classic {:mvn/version "1.2.3"}}}}
+
+ :mvn/repos {"central" {:url "https://repo1.maven.org/maven2/"}
+             "clojars" {:url "https://clojars.org/repo"}}}
