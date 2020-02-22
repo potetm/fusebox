@@ -2,6 +2,7 @@
   (:require
     [clojure.tools.logging :as log])
   (:import
+    (com.potetm.fusebox PersistentCircularBuffer)
     (java.util.concurrent Executors
                           ScheduledThreadPoolExecutor
                           ThreadFactory
@@ -13,29 +14,33 @@
 ;; Unit Conversion                                                            ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn to-ns [[v unit]]
-  (let [u (case unit
-            (:nano :nanos :nanosecond :nanoseconds)
-            TimeUnit/NANOSECONDS
+(defn unit [kw]
+  (case kw
+    (:ns :nano :nanos :nanosecond :nanoseconds)
+    TimeUnit/NANOSECONDS
 
-            (:micro :micros :microsecond :microseconds)
-            TimeUnit/MICROSECONDS
+    (:µs :us :micro :micros :microsecond :microseconds)
+    TimeUnit/MICROSECONDS
 
-            (:milli :millis :millisecond :milliseconds)
-            TimeUnit/MILLISECONDS
+    (:ms :milli :millis :millisecond :milliseconds)
+    TimeUnit/MILLISECONDS
 
-            (:sec :secs :second :seconds)
-            TimeUnit/SECONDS
+    (:s :sec :secs :second :seconds)
+    TimeUnit/SECONDS
 
-            (:min :mins :minute :minutes)
-            TimeUnit/MINUTES
+    (:m :min :mins :minute :minutes)
+    TimeUnit/MINUTES
 
-            (:hour :hours)
-            TimeUnit/HOURS
+    (:h :hr :hour :hours)
+    TimeUnit/HOURS
 
-            (:day :days)
-            TimeUnit/DAYS)]
-    (.toNanos u v)))
+    (:d :day :days)
+    TimeUnit/DAYS))
+
+(defn convert [[v orig] target]
+  (.convert (unit target)
+            v
+            (unit orig)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Utilities                                                                  ;;
@@ -59,6 +64,9 @@
          (throw ie#))
        ~@catches+finally)))
 
+(defn circular-buffer [size]
+  (PersistentCircularBuffer. size))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Timeout                                                                    ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -80,7 +88,7 @@
 
 
 (defn timeout* [{to :fusebox/timeout} f]
-  (let [ns (to-ns to)
+  (let [ns (convert to :nanos)
         t (Thread/currentThread)
         done (atom nil)]
     (try
@@ -103,8 +111,7 @@
 
 (defmacro with-timeout [spec & body]
   `(timeout* ~spec
-             (fn []
-               ~@body)))
+             (^{:once true} fn [] ~@body)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Retry                                                                      ;;
@@ -135,14 +142,6 @@
                               v)
                     (recur (inc n))
                     (throw v)))))))
-
-
-(defn retry-times [max retry-count]
-  (<= retry-count max))
-
-
-(defn retry-for [max-millis exec-duration]
-  (<= exec-duration max-millis))
 
 
 (defn delay-exp [retry-count]
@@ -189,40 +188,31 @@
                   exec)))
 
 
-(defn sliding-vec-conj [vec size val]
-  (conj (if (< (count vec) size)
-          vec
-          (subvec vec 1 size))
-        val))
-
-
-(defn record [{lim :fusebox/record-limit :as s}
-              event-type]
-  (update s
+(defn record [spec event-type]
+  (update spec
           :fusebox/record
-          sliding-vec-conj
-          lim
+          conj
           event-type))
 
 
-(defn process-transition [s {t :to
-                             pred :if}]
-  (cond
-    pred (when (pred s)
-           (assoc s
-             :fusebox/allow-pct t
-             :fusebox/record []))
-    :else (assoc s
-            :fusebox/allow-pct t
-            :fusebox/record [])))
+(defn process-transition [{r :fusebox/record :as s}
+                          {t :to
+                           pred :if}]
+  (when (pred s)
+    (assoc s
+      :fusebox/allow-pct t
+      :fusebox/record (empty r))))
 
 
 (defn transition [{prev :fusebox/allow-pct
                    trns :fusebox/states :as s}]
-  (or (some (partial process-transition s)
-            (get-in trns
-                    [prev :transitions]))
-      s))
+  (reduce (fn [s trn]
+            (if-let [s' (process-transition s trn)]
+              (reduced s')
+              s))
+          s
+          (get-in trns
+                  [prev :transitions])))
 
 
 (defn- schedule!
@@ -250,23 +240,23 @@
                                        ;; intervening transition, our transition
                                        ;; is not applicable.
                                        s)))]
-                   (if (and
-                         ;; No intervening transition.
-                         (= curr-allow prev-pct)
-                         ;; No transition occurred
-                         (= prev new))
+                   (when (and
+                           ;; No intervening transition.
+                           (= curr-allow prev-pct)
+                           ;; No transition occurred
+                           (= prev new))
                      ;; validation error, transition to self
                      (.schedule @circuit-breaker-scheduler
                                 ^Callable sched
-                                ^long (to-ns a)
+                                ^long (convert a :nanos)
                                 TimeUnit/NANOSECONDS)))
                  (catch Exception e
                    (log/error "error in scheduler"
-                              e))))]
-
+                              e
+                              txn))))]
          (.schedule @circuit-breaker-scheduler
                     sched
-                    ^long (to-ns a)
+                    ^long (convert a :nanos)
                     TimeUnit/NANOSECONDS)
          nil)))))
 
@@ -290,7 +280,9 @@
                      [n d :as rat] :ratio}]
   (when rat
     (let [chk (if v
-                (partial = v)
+                (if (keyword? v)
+                  #(identical? v %)
+                  #(= v %))
                 (partial contains? vs))]
       (fn [{r :fusebox/record}]
         (<= n
@@ -301,31 +293,33 @@
 
 
 (defn- normalize [{sts :fusebox/states :as state}]
-  (let [fail-ratio-pred (fn [trn]
-                          (if-let [p (ratio->pred trn)]
-                            (assoc trn :if p)
-                            trn))]
+  (let [insert-preds (fn [trn]
+                       (when trn
+                         (if-let [p (ratio->pred trn)]
+                           (assoc trn :if p)
+                           (if-not (:if trn)
+                             (assoc trn :if (constantly true))
+                             trn))))]
     (assoc state
       :fusebox/states (into {}
                             (map (fn [[ap {sch :schedule
                                            trns :transitions :as st}]]
                                    [ap (assoc st
-                                         :schedule (fail-ratio-pred sch)
-                                         :transitions (mapv fail-ratio-pred
+                                         :schedule (insert-preds sch)
+                                         :transitions (mapv insert-preds
                                                             trns))]))
                             sts))))
 
 
 (def defaults
   {:fusebox/allow-pct 100
-   :fusebox/record []
-   :fusebox/record-limit 128
+   :fusebox/record (circular-buffer 128)
    :fusebox/states {100 {:transitions [{:to 0
                                         :ratio [3 5]
                                         :value :failure}]}
 
                     50 {:schedule {:to 100
-                                   :after [1 :minute]
+                                   :after [1 :s #_:minute]
                                    :ratio [10 10]
                                    :value :success}
                         :transitions [{:to 0
@@ -333,7 +327,7 @@
                                        :value :failure}]}
 
                     0 {:schedule {:to 50
-                                  :after [1 :minute]}}}})
+                                  :after [1 :s #_:minute]}}}})
 
 
 (defn circuit-breaker
@@ -350,7 +344,8 @@
 
 
 (defn shutdown [cb]
-  (remove-watch cb ::schedule-transition))
+  (remove-watch cb ::schedule-transition)
+  nil)
 
 
 (defn with-circuit-breaker* [{cb :fusebox/circuit-breaker} f]
@@ -369,27 +364,33 @@
 
 (defmacro with-circuit-breaker [spec & body]
   `(with-circuit-breaker* ~spec
-                          (fn []
-                            ~@body)))
+                          (^{:once true} fn [] ~@body)))
 
 
 (defmacro failsafe [spec & body]
   `(with-retry spec
-               (with-circuit-breaker spec
-                                     (with-timeout spec
-                                                   ~@body))))
+     (with-circuit-breaker spec
+       (with-timeout spec
+         ~@body))))
 
 (comment
   (def spec {:fusebox/circuit-breaker (circuit-breaker)
              :fusebox/retry-delay (fn [retry-count exec-duration]
-                                    (jitter 0.80
-                                            (delay-exp retry-count)))
-             :fusebox/retry? (fn [retry-count exec-duration last-error]
-                               (retry-times 5 retry-count))
-             :fusebox/timeout [1 :seconds]})
+                                    100
+                                    #_(jitter 0.80
+                                              (delay-exp retry-count)))
+             :fusebox/retry? (fn [retry-count exec-duration-ms last-error]
+                               (and (<= retry-count 4)
+                                    #_(<= exec-duration-ms
+                                          (convert [30 :seconds]
+                                                   :millis))))
+             :fusebox/timeout [10 :ms]})
 
+  (swap! (get spec :fusebox/circuit-breaker)
+         assoc
+         :fusebox/allow-pct 50)
   (failsafe spec
-            (Thread/sleep 2000))
+    (Thread/sleep 5))
 
   (shutdown (:fusebox/circuit-breaker spec))
   )

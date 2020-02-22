@@ -1,10 +1,14 @@
-{:paths ["src/clojure"]
+{:paths ["src/clojure"
+         "target/classes"]
 
  :deps {org.clojure/clojure {:mvn/version "1.10.1"}
         org.clojure/tools.logging {:mvn/version "0.6.0"}}
 
- :aliases {:dev {:extra-paths ["dev" "dev-resources"]
+ :aliases {:cursive {:extra-paths ["src/java"]}
+           :dev {:extra-paths ["dev" "dev-resources"]
                  :extra-deps {nrepl/nrepl {:mvn/version "0.6.0"}
+                              com.clojure-goes-fast/clj-memory-meter {:mvn/version "0.1.2"}
+                              org.clojure/test.check {:mvn/version "1.0.0"}
 
                               ;; Java's crazy logging
                               org.slf4j/slf4j-api {:mvn/version "1.7.30"}

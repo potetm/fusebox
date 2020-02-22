@@ -4,6 +4,10 @@ set -Eeuo pipefail
 
 cd "$(dirname "$0")"/..
 
+bin/clean
+bin/javac
+
 clj \
   -A:dev \
+  -J-Djdk.attach.allowAttachSelf \
   -m nrepl.cmdline
