@@ -24,26 +24,28 @@ public class PersistentCircularBuffer extends AFn
         Iterable,
         Collection {
 
-    private static final Keyword NIL = Keyword.intern("com.potetm.fusebox", "nil");
+    private static final Object NIL = null;
     private final IPersistentVector vec;
     private final int size;
     private final int idx;
+    private final int numItems;
     private int _hash;
     private int _hasheq;
     private final IPersistentMap _meta;
     private PersistentCircularBuffer empty;
 
     public PersistentCircularBuffer(int size) {
-        this(PersistentVector.EMPTY, size, 0, null);
+        this(PersistentVector.EMPTY, size, 0, 0, null);
     }
 
     public PersistentCircularBuffer(int size, IPersistentMap _meta) {
-        this(PersistentVector.EMPTY, size, 0, _meta);
+        this(PersistentVector.EMPTY, size, 0, 0, _meta);
     }
 
     public PersistentCircularBuffer(IPersistentVector vec,
                                     int size,
                                     int idx,
+                                    int numItems,
                                     IPersistentMap _meta) {
         if (vec == null) vec = PersistentVector.EMPTY;
 
@@ -56,6 +58,7 @@ public class PersistentCircularBuffer extends AFn
         }
         assert vec.count() == size;
         this.vec = vec;
+        this.numItems = numItems;
         this.size = size;
         this.idx = idx;
         this._meta = _meta;
@@ -78,10 +81,29 @@ public class PersistentCircularBuffer extends AFn
         return index(1);
     }
 
+    private int addItems(int n) {
+        int i = n + numItems;
+        if (i < 0) {
+            return 0;
+        } else if (i > size) {
+            return size;
+        }
+
+        return i;
+    }
+
+    public int numItems() {
+        return numItems;
+    }
+
     @Override
     public IPersistentVector cons(Object o) {
         int nxt = nextIdx();
-        return new PersistentCircularBuffer(vec.assocN(nxt, o), size, nxt, _meta);
+        return new PersistentCircularBuffer(vec.assocN(nxt, o),
+                size,
+                nxt,
+                addItems(o == null ? 0 : 1),
+                _meta);
     }
 
     @Override
@@ -142,16 +164,20 @@ public class PersistentCircularBuffer extends AFn
         return notFound;
     }
 
+    @Override
     public int length() {
         return size;
     }
 
     @Override
     public IPersistentVector assocN(int i, Object val) {
+        int ni = addItems(vec.nth(index(i)) == null && val != null ? 1 : 0);
+
         return new PersistentCircularBuffer(
                 vec.assocN(index(i), val),
                 size,
                 idx,
+                ni,
                 _meta);
     }
 
@@ -174,7 +200,12 @@ public class PersistentCircularBuffer extends AFn
 
     @Override
     public IPersistentStack pop() {
-        return new PersistentCircularBuffer(vec.assocN(idx, NIL), size, idx - 1, _meta);
+        return new PersistentCircularBuffer(
+                vec.assocN(idx, NIL),
+                size,
+                idx - 1,
+                addItems(-1),
+                _meta);
     }
 
     @Override
@@ -245,7 +276,7 @@ public class PersistentCircularBuffer extends AFn
 
     @Override
     public IObj withMeta(IPersistentMap meta) {
-        return new PersistentCircularBuffer(vec, size, idx, meta);
+        return new PersistentCircularBuffer(vec, size, idx, numItems, meta);
     }
 
     @Override

@@ -67,6 +67,9 @@
 (defn circular-buffer [size]
   (PersistentCircularBuffer. size))
 
+(defn num-items [^PersistentCircularBuffer buff]
+  (.numItems buff))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Timeout                                                                    ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -275,15 +278,13 @@
           pct)))
 
 
-(defn- ratio->pred [{v :value
-                     vs :value-set
-                     [n d :as rat] :ratio}]
-  (when rat
-    (let [chk (if v
-                (if (keyword? v)
-                  #(identical? v %)
-                  #(= v %))
-                (partial contains? vs))]
+(defn- ratio->pred [{succ :success-ratio
+                     fail :failure-ratio}]
+  (when (or succ fail)
+    (let [[n d v] (if succ
+                    (conj succ :success)
+                    (conj fail :failure))
+          chk #(identical? v %)]
       (fn [{r :fusebox/record}]
         (<= n
             (count (into []
@@ -297,9 +298,7 @@
                        (when trn
                          (if-let [p (ratio->pred trn)]
                            (assoc trn :if p)
-                           (if-not (:if trn)
-                             (assoc trn :if (constantly true))
-                             trn))))]
+                           trn)))]
     (assoc state
       :fusebox/states (into {}
                             (map (fn [[ap {sch :schedule
@@ -311,23 +310,72 @@
                             sts))))
 
 
+(defn validate-circuit-breaker-spec [{sts :fusebox/states
+                                      allow :fusebox/allow-pct
+                                      record :fusebox/record}]
+  (let [validate-txns (fn [s txns]
+                        (mapcat (fn [{to :to
+                                      pred :if :as t}]
+                                  (concat
+                                    (when-not pred
+                                      [{:err "No :if for transition. This will always cause an immediate state change."
+                                        :transition t
+                                        :state s}])
+                                    (when-not (get sts to)
+                                      [{:err "No state definition for :to. This will cause the state machine to stall."
+                                        :transition t
+                                        :state s}])))
+                                txns))
+        validate-sched (fn [s {a :after
+                               to :to :as sched}]
+                         (when-not (= s 100)
+                           (concat
+                             (when-not a
+                               [{:err "No :after defined for scheduled transition."
+                                 :transition sched
+                                 :state s}])
+                             (when (and a
+                                        (not (try (convert a :nanos)
+                                                  (catch Exception e))))
+                               [{:err "Invalid :after definition. See the docstring for `convert."
+                                 :transition sched
+                                 :state s}])
+                             (when-not (get sts to)
+                               [{:err "No state definition for :to. This will cause the state machine to stall."
+                                 :transition sched
+                                 :state s}]))))
+        validate-state (fn [[s {sched :schedule
+                                txns :transitions}]]
+                         (concat
+                           (validate-txns s txns)
+                           (validate-sched s sched)))]
+    (seq (concat (when-not allow
+                   [{:err "No initial :fusebox/allow-pct defined."}])
+                 (when (and allow
+                            (not (get sts allow)))
+                   [{:err "No state definition for initial :fusebox/allow-pct."}])
+                 (when-not (instance? PersistentCircularBuffer record)
+                   [{:err "Invalid type for :fusebox/record. Must be a PersistentCircularBuffer."
+                     :record record
+                     :found-type (type record)}])
+                 (mapcat validate-state
+                         sts)))))
+
+
 (def defaults
   {:fusebox/allow-pct 100
    :fusebox/record (circular-buffer 128)
    :fusebox/states {100 {:transitions [{:to 0
-                                        :ratio [3 5]
-                                        :value :failure}]}
+                                        :failure-ratio [3 5]}]}
 
                     50 {:schedule {:to 100
-                                   :after [1 :s #_:minute]
-                                   :ratio [10 10]
-                                   :value :success}
+                                   :after [1 :minute]
+                                   :success-ratio [10 10]}
                         :transitions [{:to 0
-                                       :ratio [3 5]
-                                       :value :failure}]}
+                                       :failure-ratio [3 5]}]}
 
                     0 {:schedule {:to 50
-                                  :after [1 :s #_:minute]}}}})
+                                  :after [1 :min]}}}})
 
 
 (defn circuit-breaker

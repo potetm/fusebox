@@ -4,7 +4,8 @@
     [clojure.test.check.generators :as gen]
     [clojure.test.check.properties :as prop]
     [clojure.test.check.clojure-test :as gtest])
-  (:import (com.potetm.fusebox PersistentCircularBuffer)))
+  (:import
+    (com.potetm.fusebox PersistentCircularBuffer)))
 
 (def coll (gen/vector gen/small-integer))
 
