@@ -1,13 +1,16 @@
 (ns com.potetm.fusebox
   (:require
-    [clojure.tools.logging :as log])
+    [clojure.edn :as edn]
+    [clojure.java.io :as io]
+    [clojure.tools.logging :as log]
+    [clojure.walk :as walk])
   (:import
+    (clojure.lang ExceptionInfo)
     (com.potetm.fusebox PersistentCircularBuffer)
     (java.util.concurrent Executors
                           ScheduledThreadPoolExecutor
                           ThreadFactory
                           ThreadLocalRandom
-                          TimeoutException
                           TimeUnit)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -64,11 +67,40 @@
          (throw ie#))
        ~@catches+finally)))
 
+
 (defn circular-buffer [size]
   (PersistentCircularBuffer. size))
 
-(defn num-items [^PersistentCircularBuffer buff]
+
+(defn num-items
+  "Get the number of non-nil items in constant time.
+
+  Note this is different than the size of the buffer, which is fixed."
+  [^PersistentCircularBuffer buff]
   (.numItems buff))
+
+
+(defn pretty-spec
+  ([{cb :fusebox/circuit-breaker :as spec}]
+   (pretty-spec @cb spec))
+  ([cb spec]
+   (-> spec
+       (dissoc :fusebox/circuit-breaker)
+       (assoc :fusebox/circuit-breaker-state
+              (walk/postwalk (fn [v]
+                               (if (map? v)
+                                 (cond-> v
+                                         (:if v) (dissoc :if)
+                                         (:fusebox/record v) (update :fusebox/record
+                                                                     #(remove nil? %)))
+                                 v))
+                             cb)))))
+
+
+(def edn-props
+  (when-some [url (io/resource "fusebox.edn")]
+    (edn/read-string (slurp url))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Timeout                                                                    ;;
@@ -80,7 +112,10 @@
          (delay (let [tc (atom -1)
                       ^ScheduledThreadPoolExecutor exec
                       (Executors/newScheduledThreadPool
-                        4
+                        (or (:fusebox.timeout-scheduler/num-threads edn-props)
+                            (min 4
+                                 (int (/ (.availableProcessors (Runtime/getRuntime))
+                                         2))))
                         (reify ThreadFactory
                           (newThread [this r]
                             (doto (Thread. r)
@@ -90,7 +125,7 @@
                   exec)))
 
 
-(defn timeout* [{to :fusebox/timeout} f]
+(defn timeout* [{to :fusebox/timeout :as spec} f]
   (let [ns (convert to :nanos)
         t (Thread/currentThread)
         done (atom nil)]
@@ -108,11 +143,22 @@
         ret)
       (catch InterruptedException ie
         (if (= @done ::timeout)
-          (throw (TimeoutException. (str "fusebox timeout after " to)))
+          (throw (ex-info "fusebox timeout"
+                          {:fusebox/error :fusebox.error/timeout
+                           :fusebox/spec (pretty-spec spec)}))
           (throw ie))))))
 
 
-(defmacro with-timeout [spec & body]
+(defmacro with-timeout
+  "Evaluates body and interrupts the thread if it lasts longer
+  than specified.
+
+  NOTE: Relies on being able to reliably catch InterruptedException.
+  Use `try-interruptible instead of clojure.core/try in body.
+
+  spec is map containing:
+    :fusebox/timeout - a time unit tuple (e.g. [10 :seconds])"
+  [spec & body]
   `(timeout* ~spec
              (^{:once true} fn [] ~@body)))
 
@@ -120,11 +166,24 @@
 ;; Retry                                                                      ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def ^:dynamic *retry-count*)
-(def ^:dynamic *exec-duration-ms*)
+(def ^{:dynamic true
+       :doc
+       "The number of times a call has been previously attempted.
+
+       This is intended primarily for diagnostic purposes (e.g. occasional
+       logging or metrics) in lieu of hooks."}
+  *retry-count*)
+
+(def ^{:dynamic true
+       :doc
+       "The approximate time spent attempting a call.
+
+       This is intended primarily for diagnostic purposes (e.g. occasional
+       logging or metrics) in lieu of hooks."}
+  *exec-duration-ms*)
 
 (defn retry* [{retry? :fusebox/retry?
-               delay :fusebox/retry-delay}
+               delay :fusebox/retry-delay :as spec}
               f]
   (let [start (System/currentTimeMillis)
         exec-dur #(- (System/currentTimeMillis)
@@ -133,31 +192,52 @@
       (when-not (zero? n)
         (Thread/sleep (delay n
                              (exec-dur))))
-      (let [[ret v] (try [::success (binding [*retry-count* n
-                                              *exec-duration-ms* (exec-dur)]
-                                      (f))]
-                         (catch Exception e
-                           [::error e]))]
+      (let [[ret v] (try-interruptible
+                      [::success (binding [*retry-count* n
+                                           *exec-duration-ms* (exec-dur)]
+                                   (f))]
+                      (catch Exception e
+                        [::error e]))]
         (case ret
           ::success v
-          ::error (if (retry? (inc n)
-                              (exec-dur)
-                              v)
-                    (recur (inc n))
-                    (throw v)))))))
+          ::error (let [ed (exec-dur)]
+                    (if (retry? (inc n)
+                                ed
+                                v)
+                      (recur (inc n))
+                      (throw (ex-info "fusebox retries exhausted"
+                                      {:fusebox/error :fusebox.error/retries-exhausted
+                                       :fusebox/num-retries n
+                                       :fusebox/exec-duration-ms ed
+                                       :fusebox/spec (pretty-spec spec)}
+                                      v)))))))))
 
 
-(defn delay-exp [retry-count]
+(defn delay-exp
+  "Calculate an exponential delay in millis.
+
+  retry-count - the number of previous attempts"
+  [retry-count]
   (long (* 100
            (Math/pow 2 retry-count))))
 
 
-(defn delay-linear [factor retry-count]
+(defn delay-linear
+  "Calculate a linear delay in millis.
+
+  factor      - the linear factor to use
+  retry-count - the number of previous attempts"
+  [factor retry-count]
   (long (* retry-count
            factor)))
 
 
-(defn jitter [jitter-factor delay]
+(defn jitter
+  "Randomly jitter a given delay.
+
+  jitter-factor - the decimal jitter percentage, between 0 and 1
+  delay         - the base delay in millis"
+  [jitter-factor delay]
   (let [jit (long (* jitter-factor
                      delay))]
     (+ delay
@@ -166,7 +246,17 @@
                   jit))))
 
 
-(defmacro with-retry [spec & body]
+(defmacro with-retry
+  "Evaluate body, retrying if an exception is thrown.
+
+  spec is map containing:
+    :fusebox/retry? - A predicate called after an exception to determine
+                      whether body should be re-evaluated. Takes three args:
+                      eval-count, exec-duration-ms, and the exception.
+    :fusebox/retry-delay - Calculates the delay in millis to wait prior to the
+                           next evaluation. Takes two args:
+                           eval-count and exec-duration-ms."
+  [spec & body]
   `(retry* ~spec
            (fn [] ~@body)))
 
@@ -181,7 +271,8 @@
          (delay (let [tc (atom -1)
                       ^ScheduledThreadPoolExecutor exec
                       (Executors/newScheduledThreadPool
-                        1
+                        (or (:fusebox.circuit-breaker-scheduler/num-threads edn-props)
+                            1)
                         (reify ThreadFactory
                           (newThread [this r]
                             (doto (Thread. r)
@@ -278,36 +369,28 @@
           pct)))
 
 
-(defn- ratio->pred [{succ :success-ratio
-                     fail :failure-ratio}]
-  (when (or succ fail)
-    (let [[n d v] (if succ
-                    (conj succ :success)
-                    (conj fail :failure))
-          chk #(identical? v %)]
-      (fn [{r :fusebox/record}]
-        (<= n
-            (count (into []
-                         (comp (take d)
-                               (filter chk))
-                         (rseq r))))))))
+(defn ratio-matching? [{r :fusebox/record} pred [n d]]
+  (<= n
+      (count (into []
+                   (comp (take d)
+                         (filter pred))
+                   (rseq r)))))
 
 
-(defn- normalize [{sts :fusebox/states :as state}]
-  (let [insert-preds (fn [trn]
-                       (when trn
-                         (if-let [p (ratio->pred trn)]
-                           (assoc trn :if p)
-                           trn)))]
-    (assoc state
-      :fusebox/states (into {}
-                            (map (fn [[ap {sch :schedule
-                                           trns :transitions :as st}]]
-                                   [ap (assoc st
-                                         :schedule (insert-preds sch)
-                                         :transitions (mapv insert-preds
-                                                            trns))]))
-                            sts))))
+(defn success?
+  "Is k the :success keyword?
+
+  This exists primarily to avoid constant re-allocation of a hot function."
+  [k]
+  (identical? :success k))
+
+
+(defn failure?
+  "Is k the :failure keyword?
+
+  This exists primarily to avoid constant re-allocation of a hot function."
+  [k]
+  (identical? :failure k))
 
 
 (defn validate-circuit-breaker-spec [{sts :fusebox/states
@@ -318,32 +401,42 @@
                                       pred :if :as t}]
                                   (concat
                                     (when-not pred
-                                      [{:err "No :if for transition. This will always cause an immediate state change."
+                                      [{:err "No :if defined for transition."
                                         :transition t
                                         :state s}])
                                     (when-not (get sts to)
-                                      [{:err "No state definition for :to. This will cause the state machine to stall."
+                                      [{:err (str "No state definition for :to. This will "
+                                                  "cause the state machine to stall.")
                                         :transition t
                                         :state s}])))
                                 txns))
         validate-sched (fn [s {a :after
                                to :to :as sched}]
-                         (when-not (= s 100)
-                           (concat
-                             (when-not a
-                               [{:err "No :after defined for scheduled transition."
-                                 :transition sched
-                                 :state s}])
-                             (when (and a
-                                        (not (try (convert a :nanos)
-                                                  (catch Exception e))))
-                               [{:err "Invalid :after definition. See the docstring for `convert."
-                                 :transition sched
-                                 :state s}])
-                             (when-not (get sts to)
-                               [{:err "No state definition for :to. This will cause the state machine to stall."
-                                 :transition sched
-                                 :state s}]))))
+                         (concat
+                           (when (and (= s 100)
+                                      sched)
+                             [{:err (str ":schedule defined for :fusebox/allow-pct 100. "
+                                         "This will cause periodic unnecessary failure (but "
+                                         "may be useful for dev or testing).")
+                               :transition sched
+                               :state s}])
+                           (when-not (= s 100)
+                             (concat
+                               (when-not a
+                                 [{:err "No :after defined for scheduled transition."
+                                   :transition sched
+                                   :state s}])
+                               (when (and a
+                                          (not (try (convert a :nanos)
+                                                    (catch Exception e))))
+                                 [{:err "Invalid :after definition. See the docstring for `convert."
+                                   :transition sched
+                                   :state s}])
+                               (when-not (get sts to)
+                                 [{:err (str "No state definition for :to. This will "
+                                             "cause the state machine to stall in state " to ".")
+                                   :transition sched
+                                   :state s}])))))
         validate-state (fn [[s {sched :schedule
                                 txns :transitions}]]
                          (concat
@@ -366,24 +459,37 @@
   {:fusebox/allow-pct 100
    :fusebox/record (circular-buffer 128)
    :fusebox/states {100 {:transitions [{:to 0
-                                        :failure-ratio [3 5]}]}
+                                        :if (fn [state]
+                                              (ratio-matching? state
+                                                               failure?
+                                                               [5 10]))}]}
 
                     50 {:schedule {:to 100
                                    :after [1 :minute]
-                                   :success-ratio [10 10]}
+                                   :if (fn [state]
+                                         (ratio-matching? state
+                                                          success?
+                                                          [10 10]))}
                         :transitions [{:to 0
-                                       :failure-ratio [3 5]}]}
+                                       :if (fn [state]
+                                             (ratio-matching? state
+                                                              failure?
+                                                              [3 5]))}]}
 
                     0 {:schedule {:to 50
                                   :after [1 :min]}}}})
 
 
+(comment
+  (validate-circuit-breaker-spec
+    defaults))
+
 (defn circuit-breaker
   ([]
    (circuit-breaker {}))
   ([init]
-   (let [cb (atom (normalize (merge defaults
-                                    init)))]
+   (let [cb (atom (merge defaults
+                         init))]
      (add-watch cb
                 ::schedule-transition
                 (fn [_k _cb old new]
@@ -396,18 +502,23 @@
   nil)
 
 
-(defn with-circuit-breaker* [{cb :fusebox/circuit-breaker} f]
+(defn with-circuit-breaker* [{cb :fusebox/circuit-breaker :as spec} f]
   (let [curr @cb]
     (if (allow? curr)
-      (try
+      (try-interruptible
         (let [ret (f)]
           (record! cb :success)
           ret)
+        (catch ExceptionInfo e
+          (when-not (:fusebox/ignore? (ex-data e))
+            (record! cb :failure))
+          (throw e))
         (catch Exception e
           (record! cb :failure)
           (throw e)))
       (throw (ex-info "fusebox circuit breaker open"
-                      (dissoc curr :fusebox/states))))))
+                      {:fusebox/error :fusebox.error/circuit-breaker-open
+                       :fusebox/spec (pretty-spec spec)})))))
 
 
 (defmacro with-circuit-breaker [spec & body]
@@ -415,7 +526,7 @@
                           (^{:once true} fn [] ~@body)))
 
 
-(defmacro failsafe [spec & body]
+(defmacro bulwark [spec & body]
   `(with-retry spec
      (with-circuit-breaker spec
        (with-timeout spec
@@ -437,8 +548,9 @@
   (swap! (get spec :fusebox/circuit-breaker)
          assoc
          :fusebox/allow-pct 50)
-  (failsafe spec
-    (Thread/sleep 5))
+  (bulwark spec
+           (Thread/sleep 20))
 
+  (pretty-spec spec)
   (shutdown (:fusebox/circuit-breaker spec))
   )

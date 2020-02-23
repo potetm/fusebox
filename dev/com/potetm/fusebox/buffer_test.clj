@@ -40,7 +40,7 @@
   (prop/for-all [c (gen/vector gen/small-integer
                                1
                                1024)]
-    (= (slide -1 (seq c))
+    (= (seq c)
        (seq (into (PersistentCircularBuffer. (count c))
                   c)))))
 
@@ -56,6 +56,6 @@
   (prop/for-all [c (gen/vector gen/small-integer
                                1
                                1024)]
-    (= (slide -1 (iterator-seq (.iterator c)))
+    (= (iterator-seq (.iterator c))
        (iterator-seq (.iterator (into (PersistentCircularBuffer. (count c))
                                       c))))))

@@ -218,7 +218,7 @@ public class PersistentCircularBuffer extends AFn
     @Override
     public ISeq seq() {
         if (size > 0)
-            return new Seq(this, 0);
+            return new Seq(this, 1);
         return null;
     }
 
@@ -352,7 +352,7 @@ public class PersistentCircularBuffer extends AFn
 
     private static class Iter implements Iterator<Object> {
         private final PersistentCircularBuffer cb;
-        private int idx = 0;
+        private int idx = 1;
 
         public Iter(PersistentCircularBuffer cb) {
             this.cb = cb;
@@ -360,7 +360,7 @@ public class PersistentCircularBuffer extends AFn
 
         @Override
         public boolean hasNext() {
-            return idx < cb.size;
+            return idx <= cb.size;
         }
 
         @Override
@@ -391,7 +391,7 @@ public class PersistentCircularBuffer extends AFn
 
         @Override
         public ISeq next() {
-            if (i + 1 < cb.size)
+            if (i + 1 <= cb.size)
                 return new Seq(cb, i + 1);
             return null;
         }
@@ -408,13 +408,13 @@ public class PersistentCircularBuffer extends AFn
 
         @Override
         public int count() {
-            return cb.size - i;
+            return cb.size - i + 1;
         }
 
         @Override
         public Object reduce(IFn f) {
             Object ret = cb.nth(i);
-            for (int x = i + 1; x < cb.size; x++) {
+            for (int x = i + 1; x <= cb.size; x++) {
                 ret = f.invoke(ret, cb.nth(x));
                 if (RT.isReduced(ret))
                     return ((IDeref) ret).deref();
@@ -425,7 +425,7 @@ public class PersistentCircularBuffer extends AFn
         @Override
         public Object reduce(IFn f, Object start) {
             Object ret = f.invoke(start, cb.nth(i));
-            for (int x = i + 1; x < cb.size; x++) {
+            for (int x = i + 1; x <= cb.size; x++) {
                 if (RT.isReduced(ret))
                     return ((IDeref) ret).deref();
                 ret = f.invoke(ret, cb.nth(x));
