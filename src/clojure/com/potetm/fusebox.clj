@@ -5,19 +5,28 @@
     [clojure.tools.logging :as log]
     [clojure.walk :as walk])
   (:import
-    (clojure.lang ExceptionInfo)
+    (clojure.lang ExceptionInfo
+                  Var)
     (com.potetm.fusebox PersistentCircularBuffer)
-    (java.util.concurrent Executors
+    (java.util.concurrent BlockingQueue
+                          Executors
+                          ExecutorService
+                          Future
                           ScheduledThreadPoolExecutor
+                          Semaphore
+                          SynchronousQueue
                           ThreadFactory
                           ThreadLocalRandom
-                          TimeUnit)))
+                          ThreadPoolExecutor
+                          TimeoutException
+                          TimeUnit)
+    (java.util.concurrent.atomic AtomicLong)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Unit Conversion                                                            ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn unit [kw]
+(defn unit ^TimeUnit [kw]
   (case kw
     (:ns :nano :nanos :nanosecond :nanoseconds)
     TimeUnit/NANOSECONDS
@@ -40,7 +49,7 @@
     (:d :day :days)
     TimeUnit/DAYS))
 
-(defn convert [[v orig] target]
+(defn convert ^long [[v orig] target]
   (.convert (unit target)
             v
             (unit orig)))
@@ -48,6 +57,13 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Utilities                                                                  ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn convey-bindings [f]
+  (let [binds (Var/getThreadBindingFrame)]
+    (fn []
+      (Var/resetThreadBindingFrame binds)
+      (f))))
+
 
 (defmacro try-interruptible
   "Guarantees that an InterruptedException will be immediately rethrown.
@@ -85,7 +101,10 @@
    (pretty-spec @cb spec))
   ([cb spec]
    (-> spec
-       (dissoc :fusebox/circuit-breaker)
+       (dissoc :fusebox/circuit-breaker
+               :fusebox/retry-delay
+               :fusebox/retry?)
+       (update :fusebox/bulkhead dissoc :exec)
        (assoc :fusebox/circuit-breaker-state
               (walk/postwalk (fn [v]
                                (if (map? v)
@@ -106,61 +125,50 @@
 ;; Timeout                                                                    ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defonce ^{:tag ScheduledThreadPoolExecutor
+(defonce ^{:tag ExecutorService
+           :doc "An unbound threadpool used for reliably timing out calls."
            :private true}
-         timeout-scheduler
-         (delay (let [tc (atom -1)
-                      ^ScheduledThreadPoolExecutor exec
-                      (Executors/newScheduledThreadPool
-                        (or (:fusebox.timeout-scheduler/num-threads edn-props)
-                            (min 4
-                                 (int (/ (.availableProcessors (Runtime/getRuntime))
-                                         2))))
+         timeout-threadpool
+         (delay (let [tc (AtomicLong. -1)
+                      ^ExecutorService exec
+                      (Executors/newCachedThreadPool
                         (reify ThreadFactory
                           (newThread [this r]
                             (doto (Thread. r)
-                              (.setName (str "fusebox-timeout-scheduler-thread"
-                                             (swap! tc inc)))
+                              (.setName (str "fusebox-timeout-scheduler-thread-"
+                                             (.incrementAndGet tc)))
                               (.setDaemon true)))))]
                   exec)))
 
-
-(defn timeout* [{to :fusebox/timeout :as spec} f]
-  (let [ns (convert to :nanos)
-        t (Thread/currentThread)
-        done (atom nil)]
+(defn timeout* [{to :fusebox/exec-timeout
+                 intr? :fusebox.timeout/interrupt?
+                 :or {intr? true}
+                 :as spec}
+                f]
+  (let [fut (.submit ^ExecutorService timeout-threadpool
+                     ^Callable (convey-bindings f))]
     (try
-      (.schedule @timeout-scheduler
-                 ^Callable (fn []
-                             (when (compare-and-set! done
-                                                     nil
-                                                     ::timeout)
-                               (.interrupt t)))
-                 ^long ns
-                 TimeUnit/NANOSECONDS)
-      (let [ret (f)]
-        (compare-and-set! done nil ::done)
-        ret)
+      (.get fut
+            (convert to :ns)
+            (unit :ns))
       (catch InterruptedException ie
-        (if (= @done ::timeout)
-          (throw (ex-info "fusebox timeout"
-                          {:fusebox/error :fusebox.error/timeout
-                           :fusebox/spec (pretty-spec spec)}))
-          (throw ie))))))
+        (.cancel fut intr?)
+        (throw ie))
+      (catch TimeoutException to
+        (.cancel fut intr?)
+        (throw (ex-info "fusebox timeout"
+                        {:fusebox/error :fusebox.error/exec-timeout
+                         :fusebox/spec (pretty-spec spec)}))))))
 
 
 (defmacro with-timeout
-  "Evaluates body and interrupts the thread if it lasts longer
-  than specified.
-
-  NOTE: Relies on being able to reliably catch InterruptedException.
-  Use `try-interruptible instead of clojure.core/try in body.
+  "Evaluates body, aborting if it lasts longer than specified.
 
   spec is map containing:
     :fusebox/timeout - a time unit tuple (e.g. [10 :seconds])"
   [spec & body]
   `(timeout* ~spec
-             (^{:once true} fn [] ~@body)))
+             (^{:once true} fn* [] ~@body)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Retry                                                                      ;;
@@ -171,7 +179,7 @@
        "The number of times a call has been previously attempted.
 
        This is intended primarily for diagnostic purposes (e.g. occasional
-       logging or metrics) in lieu of hooks."}
+       logging or metrics) in lieu of callback hooks."}
   *retry-count*)
 
 (def ^{:dynamic true
@@ -179,7 +187,7 @@
        "The approximate time spent attempting a call.
 
        This is intended primarily for diagnostic purposes (e.g. occasional
-       logging or metrics) in lieu of hooks."}
+       logging or metrics) in lieu of callback hooks."}
   *exec-duration-ms*)
 
 (defn retry* [{retry? :fusebox/retry?
@@ -253,13 +261,144 @@
     :fusebox/retry? - A predicate called after an exception to determine
                       whether body should be re-evaluated. Takes three args:
                       eval-count, exec-duration-ms, and the exception.
-    :fusebox/retry-delay - Calculates the delay in millis to wait prior to the
-                           next evaluation. Takes two args:
+    :fusebox/retry-delay - A function which calculates the delay in millis to
+                           wait prior to the next evaluation. Takes two args:
                            eval-count and exec-duration-ms."
   [spec & body]
   `(retry* ~spec
            (fn [] ~@body)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Bulkhead                                                                   ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defprotocol IBulkhead
+  (-run
+    [this f]
+    [this f wait-timeout]
+    [this f wait-timeout exec-timeout]))
+
+
+(def ^{:dynamic true
+       :private true} *offer-timeout* nil)
+
+
+(defn ^BlockingQueue timed-offer-queue []
+  (proxy [SynchronousQueue] [true]
+    (offer [e]
+      (if *offer-timeout*
+        (proxy-super offer
+                     e
+                     (convert *offer-timeout*
+                              :ns)
+                     (unit :ns))
+        (proxy-super offer e)))))
+
+
+(defrecord ThreadpoolBulkhead [concurrency ^ExecutorService exec]
+  IBulkhead
+  (-run [this f]
+    (.get (.submit ^ExecutorService exec
+                   ^Callable (convey-bindings f))))
+  (-run [this f wait-timeout]
+    (-run this f wait-timeout nil))
+  (-run [this f wait-timeout exec-timeout]
+    (let [^Future fut (try (binding [*offer-timeout* wait-timeout]
+                             (.submit ^ExecutorService exec
+                                      ^Callable (convey-bindings f)))
+                           (catch TimeoutException to
+                             (throw (ex-info "fusebox timeout"
+                                             {:fusebox/error :fusebox.error/offer-timeout}
+                                             to))))]
+      (try
+        (if exec-timeout
+          (.get fut
+                (convert exec-timeout :ns)
+                (unit :ns))
+          (.get fut))
+        (catch InterruptedException ie
+          (.cancel fut true)
+          (throw ie))
+        (catch TimeoutException to
+          (.cancel fut true)
+          (throw (ex-info "fusebox timeout"
+                          {:fusebox/error :fusebox.error/exec-timeout}
+                          to)))))))
+
+
+(defn threadpool-bulkhead [^long concurrency]
+  (let [exec (ThreadPoolExecutor.
+               concurrency
+               concurrency
+               0 (unit :ms)
+               (timed-offer-queue)
+               (let [tc (AtomicLong. -1)]
+                 (reify ThreadFactory
+                   (newThread [this r]
+                     (doto (Thread. r)
+                       (.setName (str "fusebox-bulkhead-threadpool-"
+                                      (.incrementAndGet tc)))
+                       (.setDaemon true))))))]
+    (->ThreadpoolBulkhead concurrency
+                          exec)))
+
+
+(defrecord SemaphoreBulkhead [concurrency ^Semaphore s]
+  IBulkhead
+  (-run [this f]
+    (.acquire s)
+    (try (f)
+         (finally
+           (.release s))))
+  (-run [this f offer-timeout]
+    (if (.tryAcquire s
+                     (convert offer-timeout :ns)
+                     (unit :ns))
+      (try (f)
+           (finally
+             (.release s)))
+      (throw (ex-info "fusebox timeout"
+                      {:fusebox/error :fusebox.error/offer-timeout}))))
+  (-run [this f offer-timeout exec-timeout]
+    (throw (UnsupportedOperationException.
+             (str "SemaphoreBulkhead does not support an exec-timeout. "
+                  "There is no reliable way in the JVM to guarantee that execution "
+                  "halts. Using ThreadpoolBulkhead at least guarantees that "
+                  "you only have N-many processes running at the same time.")))))
+
+
+(defn semaphore-bulkhead [^long concurrency]
+  (->SemaphoreBulkhead concurrency
+                       (Semaphore. concurrency)))
+
+
+(defn with-bulkhead* [{bh :fusebox/bulkhead
+                       offer-to :fusebox.bulkhead/offer-timeout
+                       exec-to :fusebox/exec-timeout :as spec}
+                      f]
+  (try
+    (cond
+      (and offer-to
+           exec-to)
+      (-run bh
+            f
+            offer-to
+            exec-to)
+
+      offer-to
+      (-run bh f offer-to)
+
+      :else
+      (-run bh f))
+    (catch Exception e
+      (throw (ex-info "Error in with-bulkhead*"
+                      {:fusebox/spec (pretty-spec spec)}
+                      e)))))
+
+
+(defmacro with-bulkhead [spec & body]
+  `(with-bulkhead* ~spec
+                   (^{:once true} fn* [] ~@body)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Circuit Breaker                                                            ;;
@@ -268,7 +407,7 @@
 (defonce ^{:tag ScheduledThreadPoolExecutor
            :private true}
          circuit-breaker-scheduler
-         (delay (let [tc (atom -1)
+         (delay (let [tc (AtomicLong. -1)
                       ^ScheduledThreadPoolExecutor exec
                       (Executors/newScheduledThreadPool
                         (or (:fusebox.circuit-breaker-scheduler/num-threads edn-props)
@@ -276,8 +415,8 @@
                         (reify ThreadFactory
                           (newThread [this r]
                             (doto (Thread. r)
-                              (.setName (str "fusebox-circuit-breaker-scheduler-thread"
-                                             (swap! tc inc)))
+                              (.setName (str "fusebox-circuit-breaker-scheduler-thread-"
+                                             (.incrementAndGet tc)))
                               (.setDaemon true)))))]
                   exec)))
 
@@ -300,13 +439,9 @@
 
 (defn transition [{prev :fusebox/allow-pct
                    trns :fusebox/states :as s}]
-  (reduce (fn [s trn]
-            (if-let [s' (process-transition s trn)]
-              (reduced s')
-              s))
-          s
-          (get-in trns
-                  [prev :transitions])))
+  (some (partial process-transition s)
+        (get-in trns
+                [prev :transitions])))
 
 
 (defn- schedule!
@@ -523,7 +658,7 @@
 
 (defmacro with-circuit-breaker [spec & body]
   `(with-circuit-breaker* ~spec
-                          (^{:once true} fn [] ~@body)))
+                          (^{:once true} fn* [] ~@body)))
 
 
 (defmacro bulwark [spec & body]
@@ -534,6 +669,7 @@
 
 (comment
   (def spec {:fusebox/circuit-breaker (circuit-breaker)
+             :fusebox/bulkhead (semaphore-bulkhead 1)
              :fusebox/retry-delay (fn [retry-count exec-duration]
                                     100
                                     #_(jitter 0.80
@@ -543,13 +679,18 @@
                                     #_(<= exec-duration-ms
                                           (convert [30 :seconds]
                                                    :millis))))
-             :fusebox/timeout [10 :ms]})
+             :fusebox.bulkhead/offer-timeout [10 :ms]
+             #_#_:fusebox/exec-timeout [100 :ms]})
 
   (swap! (get spec :fusebox/circuit-breaker)
          assoc
          :fusebox/allow-pct 50)
   (bulwark spec
            (Thread/sleep 20))
+
+  (with-bulkhead spec
+                 (Thread/sleep 100)
+                 (println "done!"))
 
   (pretty-spec spec)
   (shutdown (:fusebox/circuit-breaker spec))
