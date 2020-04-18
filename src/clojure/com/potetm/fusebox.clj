@@ -12,6 +12,7 @@
                           Executors
                           ExecutorService
                           Future
+                          RejectedExecutionException
                           ScheduledThreadPoolExecutor
                           Semaphore
                           SynchronousQueue
@@ -125,8 +126,7 @@
 ;; Timeout                                                                    ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defonce ^{:tag ExecutorService
-           :doc "An unbound threadpool used for reliably timing out calls."
+(defonce ^{:doc "An unbound threadpool used for reliably timing out calls."
            :private true}
          timeout-threadpool
          (delay (let [tc (AtomicLong. -1)
@@ -145,7 +145,7 @@
                  :or {intr? true}
                  :as spec}
                 f]
-  (let [fut (.submit ^ExecutorService timeout-threadpool
+  (let [fut (.submit ^ExecutorService @timeout-threadpool
                      ^Callable (convey-bindings f))]
     (try
       (.get fut
@@ -182,6 +182,7 @@
        logging or metrics) in lieu of callback hooks."}
   *retry-count*)
 
+
 (def ^{:dynamic true
        :doc
        "The approximate time spent attempting a call.
@@ -189,6 +190,7 @@
        This is intended primarily for diagnostic purposes (e.g. occasional
        logging or metrics) in lieu of callback hooks."}
   *exec-duration-ms*)
+
 
 (defn retry* [{retry? :fusebox/retry?
                delay :fusebox/retry-delay :as spec}
@@ -273,10 +275,11 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defprotocol IBulkhead
-  (-run
-    [this f]
-    [this f wait-timeout]
-    [this f wait-timeout exec-timeout]))
+  (-run [this f spec]))
+
+
+(defprotocol IShutdown
+  (-shutdown [this timeout]))
 
 
 (def ^{:dynamic true
@@ -297,33 +300,40 @@
 
 (defrecord ThreadpoolBulkhead [concurrency ^ExecutorService exec]
   IBulkhead
-  (-run [this f]
-    (.get (.submit ^ExecutorService exec
-                   ^Callable (convey-bindings f))))
-  (-run [this f wait-timeout]
-    (-run this f wait-timeout nil))
-  (-run [this f wait-timeout exec-timeout]
-    (let [^Future fut (try (binding [*offer-timeout* wait-timeout]
-                             (.submit ^ExecutorService exec
-                                      ^Callable (convey-bindings f)))
-                           (catch TimeoutException to
-                             (throw (ex-info "fusebox timeout"
-                                             {:fusebox/error :fusebox.error/offer-timeout}
-                                             to))))]
-      (try
-        (if exec-timeout
-          (.get fut
-                (convert exec-timeout :ns)
-                (unit :ns))
-          (.get fut))
-        (catch InterruptedException ie
-          (.cancel fut true)
-          (throw ie))
-        (catch TimeoutException to
-          (.cancel fut true)
-          (throw (ex-info "fusebox timeout"
-                          {:fusebox/error :fusebox.error/exec-timeout}
-                          to)))))))
+  (-run [this
+         {offer-to :fusebox.bulkhead/offer-timeout
+          exec-to :fusebox/exec-timeout
+          intr? :fusebox.timeout/interrupt?
+          :or {intr? true}
+          :as spec}
+         f]
+    (let [^Callable f (convey-bindings f)
+          ^Future fut (if offer-to
+                        (try (binding [*offer-timeout* offer-to]
+                               (.submit ^ExecutorService exec
+                                        f))
+                             (catch RejectedExecutionException rje
+                               (throw (ex-info "fusebox timeout"
+                                               {:fusebox/error :fusebox.error/offer-timeout
+                                                :fusebox/spec (pretty-spec spec)}))))
+                        (.submit ^ExecutorService exec
+                                 f))]
+      (if exec-to
+        (try (.get fut
+                   (convert exec-to :ns)
+                   (unit :ns))
+             (catch TimeoutException to
+               (.cancel fut intr?)
+               (throw (ex-info "fusebox timeout"
+                               {:fusebox/error :fusebox.error/exec-timeout
+                                :fusebox/spec (pretty-spec spec)}))))
+        (.get fut))))
+  IShutdown
+  (-shutdown [this timeout]
+    (.shutdownNow ^ExecutorService exec)
+    (.awaitTermination exec
+                       (convert timeout :ns)
+                       (unit :ns))))
 
 
 (defn threadpool-bulkhead [^long concurrency]
@@ -345,26 +355,38 @@
 
 (defrecord SemaphoreBulkhead [concurrency ^Semaphore s]
   IBulkhead
-  (-run [this f]
-    (.acquire s)
+  (-run [this
+         {offer-to :fusebox.bulkhead/offer-timeout
+          exec-to :fusebox/exec-timeout :as spec}
+         f]
+    (when exec-to
+      (throw (UnsupportedOperationException.
+               (str "SemaphoreBulkhead does not support an exec-timeout. "
+                    "There is no reliable way in the JVM to guarantee that execution "
+                    "halts. Using ThreadpoolBulkhead at least guarantees that "
+                    "you only have N processes running at the same time.\n\n"
+                    "You can use with-timeout if you like, but know that "
+                    "with-timeout runs on an unbound threadpool, and, again, "
+                    "there's no way to reliably halt execution."))))
+    (if offer-to
+      (when-not (.tryAcquire s
+                             (convert offer-to :ns)
+                             (unit :ns))
+        (throw (ex-info "fusebox timeout"
+                        {:fusebox/error :fusebox.error/offer-timeout
+                         :fusebox/spec (pretty-spec spec)})))
+      (.acquire s))
     (try (f)
          (finally
            (.release s))))
-  (-run [this f offer-timeout]
-    (if (.tryAcquire s
-                     (convert offer-timeout :ns)
-                     (unit :ns))
-      (try (f)
-           (finally
-             (.release s)))
-      (throw (ex-info "fusebox timeout"
-                      {:fusebox/error :fusebox.error/offer-timeout}))))
-  (-run [this f offer-timeout exec-timeout]
-    (throw (UnsupportedOperationException.
-             (str "SemaphoreBulkhead does not support an exec-timeout. "
-                  "There is no reliable way in the JVM to guarantee that execution "
-                  "halts. Using ThreadpoolBulkhead at least guarantees that "
-                  "you only have N-many processes running at the same time.")))))
+  IShutdown
+  (-shutdown [this timeout]
+    ;; Don't allow any more processes to acquire any more permits
+    ;; by acquiring all permits and not releasing them.
+    (.tryAcquire s
+                 concurrency
+                 (convert timeout :ns)
+                 (unit :ns))))
 
 
 (defn semaphore-bulkhead [^long concurrency]
@@ -372,28 +394,13 @@
                        (Semaphore. concurrency)))
 
 
-(defn with-bulkhead* [{bh :fusebox/bulkhead
-                       offer-to :fusebox.bulkhead/offer-timeout
-                       exec-to :fusebox/exec-timeout :as spec}
+(defn shutdown-bulkhead [bh timeout]
+  (-shutdown bh timeout))
+
+
+(defn with-bulkhead* [{bh :fusebox/bulkhead :as spec}
                       f]
-  (try
-    (cond
-      (and offer-to
-           exec-to)
-      (-run bh
-            f
-            offer-to
-            exec-to)
-
-      offer-to
-      (-run bh f offer-to)
-
-      :else
-      (-run bh f))
-    (catch Exception e
-      (throw (ex-info "Error in with-bulkhead*"
-                      {:fusebox/spec (pretty-spec spec)}
-                      e)))))
+  (-run bh spec f))
 
 
 (defmacro with-bulkhead [spec & body]
@@ -439,9 +446,10 @@
 
 (defn transition [{prev :fusebox/allow-pct
                    trns :fusebox/states :as s}]
-  (some (partial process-transition s)
-        (get-in trns
-                [prev :transitions])))
+  (or (some (partial process-transition s)
+            (get-in trns
+                    [prev :transitions]))
+      s))
 
 
 (defn- schedule!
@@ -474,7 +482,7 @@
                            (= curr-allow prev-pct)
                            ;; No transition occurred
                            (= prev new))
-                     ;; validation error, transition to self
+                     ;; validation error, transition to self, re-schedule scheduled transition
                      (.schedule @circuit-breaker-scheduler
                                 ^Callable sched
                                 ^long (convert a :nanos)
@@ -491,9 +499,9 @@
 
 
 (defn record! [cb event]
-  (swap-vals! cb
-              (comp transition record)
-              event)
+  (swap! cb
+         (comp transition record)
+         event)
   nil)
 
 
@@ -632,7 +640,7 @@
      cb)))
 
 
-(defn shutdown [cb]
+(defn shutdown-circuit-breaker [cb]
   (remove-watch cb ::schedule-transition)
   nil)
 
@@ -661,15 +669,28 @@
                           (^{:once true} fn* [] ~@body)))
 
 
+(defn shutdown-spec [{cb :fusebox/circuit-breaker
+                      bh :fusebox/bulkhead}
+                     timeout]
+  (when cb
+    (shutdown-circuit-breaker cb))
+  (when bh
+    (shutdown-bulkhead bh timeout)))
+
 (defmacro bulwark [spec & body]
-  `(with-retry spec
-     (with-circuit-breaker spec
-       (with-timeout spec
-         ~@body))))
+  `(if (:fusebox/bulkhead ~spec)
+     (with-retry ~spec
+       (with-circuit-breaker ~spec
+         (with-bulkhead ~spec
+           ~@body)))
+     (with-retry ~spec
+       (with-circuit-breaker ~spec
+         (with-timeout ~spec
+           ~@body)))))
 
 (comment
   (def spec {:fusebox/circuit-breaker (circuit-breaker)
-             :fusebox/bulkhead (semaphore-bulkhead 1)
+             :fusebox/bulkhead (threadpool-bulkhead 1) #_(semaphore-bulkhead 1)
              :fusebox/retry-delay (fn [retry-count exec-duration]
                                     100
                                     #_(jitter 0.80
@@ -680,18 +701,30 @@
                                           (convert [30 :seconds]
                                                    :millis))))
              :fusebox.bulkhead/offer-timeout [10 :ms]
-             #_#_:fusebox/exec-timeout [100 :ms]})
+             :fusebox/exec-timeout [100 :ms]})
 
+  (shutdown-spec spec [1 :sec])
+
+  (circuit-breaker)
+  (:fusebox/circuit-breaker spec)
   (swap! (get spec :fusebox/circuit-breaker)
          assoc
          :fusebox/allow-pct 50)
   (bulwark spec
-           (Thread/sleep 20))
+    (Thread/sleep 20))
 
-  (with-bulkhead spec
-                 (Thread/sleep 100)
-                 (println "done!"))
+  (macroexpand-1
+    '(bulwark spec
+       (Thread/sleep 20)))
+
+  (doseq [f [(future (with-bulkhead spec
+                       (Thread/sleep 100)
+                       (println "done!")))
+             (future (with-bulkhead spec
+                       (Thread/sleep 100)
+                       (println "done!")))]]
+    @f)
 
   (pretty-spec spec)
-  (shutdown (:fusebox/circuit-breaker spec))
+  (shutdown-circuit-breaker (:fusebox/circuit-breaker spec))
   )

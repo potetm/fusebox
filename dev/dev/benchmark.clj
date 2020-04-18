@@ -27,6 +27,8 @@
 
   (def buf (fb/circuit-breaker {:fusebox/record (PersistentCircularBuffer. 32)}))
 
+  (fb/bulwark)
+
   (with-redefs [fb/record (fn [spec event-type]
                             (update spec
                                     :fusebox/record
