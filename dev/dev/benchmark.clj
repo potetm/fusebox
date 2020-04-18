@@ -16,6 +16,16 @@
                          ~times)))))
 
 
+(defmacro n-times-ms [times & body]
+  `(let [start# (System/currentTimeMillis)]
+     (dotimes [_# ~times]
+       ~@body)
+     (println "Average ms: "
+              (double (/ (- (System/currentTimeMillis)
+                            start#)
+                         ~times)))))
+
+
 (defn sliding-vec-conj [vec size val]
   (conj (if (< (count vec) size)
           vec
@@ -25,13 +35,13 @@
 
 (comment
 
-  (def buf (fb/circuit-breaker {:fusebox/record (PersistentCircularBuffer. 32)}))
+  (def buf (fb/circuit-breaker {::record (PersistentCircularBuffer. 32)}))
 
   (fb/bulwark)
 
   (with-redefs [fb/record (fn [spec event-type]
                             (update spec
-                                    :fusebox/record
+                                    ::record
                                     conj
                                     event-type))]
     (n-times 1000000
@@ -43,12 +53,12 @@
               :debug true)
   ; => "560 B"
 
-  (def v (fb/circuit-breaker {:fusebox/record-limit 32
-                              :fusebox/record []}))
+  (def v (fb/circuit-breaker {::record-limit 32
+                              ::record []}))
 
-  (with-redefs [fb/record (fn [{lim :fusebox/record-limit :as spec} event-type]
+  (with-redefs [fb/record (fn [{lim ::record-limit :as spec} event-type]
                             (update spec
-                                    :fusebox/record
+                                    ::record
                                     sliding-vec-conj
                                     lim
                                     event-type))]
@@ -56,8 +66,8 @@
       (fb/record! v :success)))
   ; Average ns:  2138.798864
 
-  (:fusebox/record @v)
-  (mm/measure (:fusebox/record @v))
+  (::record @v)
+  (mm/measure (::record @v))
   ; => "31.0 MB"
 
   (mm/measure (into [] (repeat 128 :success)))

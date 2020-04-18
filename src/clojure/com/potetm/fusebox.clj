@@ -27,28 +27,30 @@
 ;; Unit Conversion                                                            ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(def unit*
+  (merge (zipmap [:ns :nano :nanos :nanosecond :nanoseconds]
+                 (repeat TimeUnit/NANOSECONDS))
+
+         (zipmap [:µs :us :micro :micros :microsecond :microseconds]
+                 (repeat TimeUnit/MICROSECONDS))
+
+         (zipmap [:ms :milli :millis :millisecond :milliseconds]
+                 (repeat TimeUnit/MILLISECONDS))
+
+         (zipmap [:s :sec :secs :second :seconds]
+                 (repeat TimeUnit/SECONDS))
+
+         (zipmap [:m :min :mins :minute :minutes]
+                 (repeat TimeUnit/MINUTES))
+
+         (zipmap [:h :hr :hour :hours]
+                 (repeat TimeUnit/HOURS))
+
+         (zipmap [:d :day :days]
+                 (repeat TimeUnit/DAYS))))
+
 (defn unit ^TimeUnit [kw]
-  (case kw
-    (:ns :nano :nanos :nanosecond :nanoseconds)
-    TimeUnit/NANOSECONDS
-
-    (:µs :us :micro :micros :microsecond :microseconds)
-    TimeUnit/MICROSECONDS
-
-    (:ms :milli :millis :millisecond :milliseconds)
-    TimeUnit/MILLISECONDS
-
-    (:s :sec :secs :second :seconds)
-    TimeUnit/SECONDS
-
-    (:m :min :mins :minute :minutes)
-    TimeUnit/MINUTES
-
-    (:h :hr :hour :hours)
-    TimeUnit/HOURS
-
-    (:d :day :days)
-    TimeUnit/DAYS))
+  (unit* kw))
 
 (defn convert ^long [[v orig] target]
   (.convert (unit target)
@@ -98,23 +100,12 @@
 
 
 (defn pretty-spec
-  ([{cb :fusebox/circuit-breaker :as spec}]
-   (pretty-spec @cb spec))
-  ([cb spec]
-   (-> spec
-       (dissoc :fusebox/circuit-breaker
-               :fusebox/retry-delay
-               :fusebox/retry?)
-       (update :fusebox/bulkhead dissoc :exec)
-       (assoc :fusebox/circuit-breaker-state
-              (walk/postwalk (fn [v]
-                               (if (map? v)
-                                 (cond-> v
-                                         (:if v) (dissoc :if)
-                                         (:fusebox/record v) (update :fusebox/record
-                                                                     #(remove nil? %)))
-                                 v))
-                             cb)))))
+  ([spec]
+   (dissoc spec
+           ::circuit-breaker
+           ::retry-delay
+           ::retry?
+           ::bulkhead)))
 
 
 (def edn-props
@@ -140,8 +131,8 @@
                               (.setDaemon true)))))]
                   exec)))
 
-(defn timeout* [{to :fusebox/exec-timeout
-                 intr? :fusebox.timeout/interrupt?
+(defn timeout* [{to ::exec-timeout
+                 intr? ::interrupt?
                  :or {intr? true}
                  :as spec}
                 f]
@@ -157,15 +148,15 @@
       (catch TimeoutException to
         (.cancel fut intr?)
         (throw (ex-info "fusebox timeout"
-                        {:fusebox/error :fusebox.error/exec-timeout
-                         :fusebox/spec (pretty-spec spec)}))))))
+                        {::error ::error-exec-timeout
+                         ::spec (pretty-spec spec)}))))))
 
 
 (defmacro with-timeout
   "Evaluates body, aborting if it lasts longer than specified.
 
   spec is map containing:
-    :fusebox/timeout - a time unit tuple (e.g. [10 :seconds])"
+    ::timeout - a time unit tuple (e.g. [10 :seconds])"
   [spec & body]
   `(timeout* ~spec
              (^{:once true} fn* [] ~@body)))
@@ -192,16 +183,13 @@
   *exec-duration-ms*)
 
 
-(defn retry* [{retry? :fusebox/retry?
-               delay :fusebox/retry-delay :as spec}
+(defn retry* [{retry? ::retry?
+               delay ::retry-delay :as spec}
               f]
   (let [start (System/currentTimeMillis)
         exec-dur #(- (System/currentTimeMillis)
                      start)]
     (loop [n 0]
-      (when-not (zero? n)
-        (Thread/sleep (delay n
-                             (exec-dur))))
       (let [[ret v] (try-interruptible
                       [::success (binding [*retry-count* n
                                            *exec-duration-ms* (exec-dur)]
@@ -210,16 +198,20 @@
                         [::error e]))]
         (case ret
           ::success v
-          ::error (let [ed (exec-dur)]
-                    (if (retry? (inc n)
+          ::error (let [ed (exec-dur)
+                        n' (inc n)]
+                    (if (retry? n'
                                 ed
                                 v)
-                      (recur (inc n))
+                      (do (Thread/sleep (convert (delay n'
+                                                        (exec-dur))
+                                                 :ms))
+                          (recur n'))
                       (throw (ex-info "fusebox retries exhausted"
-                                      {:fusebox/error :fusebox.error/retries-exhausted
-                                       :fusebox/num-retries n
-                                       :fusebox/exec-duration-ms ed
-                                       :fusebox/spec (pretty-spec spec)}
+                                      {::error ::error-retries-exhausted
+                                       ::num-retries n
+                                       ::exec-duration-ms ed
+                                       ::spec (pretty-spec spec)}
                                       v)))))))))
 
 
@@ -260,12 +252,12 @@
   "Evaluate body, retrying if an exception is thrown.
 
   spec is map containing:
-    :fusebox/retry? - A predicate called after an exception to determine
-                      whether body should be re-evaluated. Takes three args:
-                      eval-count, exec-duration-ms, and the exception.
-    :fusebox/retry-delay - A function which calculates the delay in millis to
-                           wait prior to the next evaluation. Takes two args:
-                           eval-count and exec-duration-ms."
+    ::retry? - A predicate called after an exception to determine
+               whether body should be re-evaluated. Takes three args:
+               eval-count, exec-duration-ms, and the exception.
+    ::retry-delay - A function which calculates the delay in millis to
+                    wait prior to the next evaluation. Takes two args:
+                    eval-count and exec-duration-ms."
   [spec & body]
   `(retry* ~spec
            (fn [] ~@body)))
@@ -301,9 +293,9 @@
 (defrecord ThreadpoolBulkhead [concurrency ^ExecutorService exec]
   IBulkhead
   (-run [this
-         {offer-to :fusebox.bulkhead/offer-timeout
-          exec-to :fusebox/exec-timeout
-          intr? :fusebox.timeout/interrupt?
+         {offer-to ::bulkhead-offer-timeout
+          exec-to ::exec-timeout
+          intr? ::interrupt?
           :or {intr? true}
           :as spec}
          f]
@@ -314,8 +306,8 @@
                                         f))
                              (catch RejectedExecutionException rje
                                (throw (ex-info "fusebox timeout"
-                                               {:fusebox/error :fusebox.error/offer-timeout
-                                                :fusebox/spec (pretty-spec spec)}))))
+                                               {::error ::error-offer-timeout
+                                                ::spec (pretty-spec spec)}))))
                         (.submit ^ExecutorService exec
                                  f))]
       (if exec-to
@@ -325,8 +317,8 @@
              (catch TimeoutException to
                (.cancel fut intr?)
                (throw (ex-info "fusebox timeout"
-                               {:fusebox/error :fusebox.error/exec-timeout
-                                :fusebox/spec (pretty-spec spec)}))))
+                               {::error ::error-exec-timeout
+                                ::spec (pretty-spec spec)}))))
         (.get fut))))
   IShutdown
   (-shutdown [this timeout]
@@ -356,8 +348,8 @@
 (defrecord SemaphoreBulkhead [concurrency ^Semaphore s]
   IBulkhead
   (-run [this
-         {offer-to :fusebox.bulkhead/offer-timeout
-          exec-to :fusebox/exec-timeout :as spec}
+         {offer-to ::bulkhead-offer-timeout
+          exec-to ::exec-timeout :as spec}
          f]
     (when exec-to
       (throw (UnsupportedOperationException.
@@ -373,8 +365,8 @@
                              (convert offer-to :ns)
                              (unit :ns))
         (throw (ex-info "fusebox timeout"
-                        {:fusebox/error :fusebox.error/offer-timeout
-                         :fusebox/spec (pretty-spec spec)})))
+                        {::error ::error-offer-timeout
+                         ::spec (pretty-spec spec)})))
       (.acquire s))
     (try (f)
          (finally
@@ -398,7 +390,7 @@
   (-shutdown bh timeout))
 
 
-(defn with-bulkhead* [{bh :fusebox/bulkhead :as spec}
+(defn with-bulkhead* [{bh ::bulkhead :as spec}
                       f]
   (-run bh spec f))
 
@@ -417,7 +409,7 @@
          (delay (let [tc (AtomicLong. -1)
                       ^ScheduledThreadPoolExecutor exec
                       (Executors/newScheduledThreadPool
-                        (or (:fusebox.circuit-breaker-scheduler/num-threads edn-props)
+                        (or (::circuit-breaker-scheduler-num-threads edn-props)
                             1)
                         (reify ThreadFactory
                           (newThread [this r]
@@ -430,22 +422,22 @@
 
 (defn record [spec event-type]
   (update spec
-          :fusebox/record
+          ::record
           conj
           event-type))
 
 
-(defn process-transition [{r :fusebox/record :as s}
+(defn process-transition [{r ::record :as s}
                           {t :to
                            pred :if}]
   (when (pred s)
     (assoc s
-      :fusebox/allow-pct t
-      :fusebox/record (empty r))))
+      ::allow-pct t
+      ::record (empty r))))
 
 
-(defn transition [{prev :fusebox/allow-pct
-                   trns :fusebox/states :as s}]
+(defn transition [{prev ::allow-pct
+                   trns ::states :as s}]
   (or (some (partial process-transition s)
             (get-in trns
                     [prev :transitions]))
@@ -456,21 +448,21 @@
   ([cb [prev curr]]
    (schedule! cb prev curr))
   ([cb
-    {prev-allow :fusebox/allow-pct}
-    {curr-allow :fusebox/allow-pct :as s}]
+    {prev-allow ::allow-pct}
+    {curr-allow ::allow-pct :as s}]
    (when (not= prev-allow
                curr-allow)
      (when-some [{a :after :as txn} (get-in s
-                                            [:fusebox/states
+                                            [::states
                                              curr-allow
                                              :schedule])]
        (let [^Callable sched
              (fn sched []
                (try
-                 (let [[{prev-pct :fusebox/allow-pct :as prev}
+                 (let [[{prev-pct ::allow-pct :as prev}
                         new]
                        (swap-vals! cb
-                                   (fn [{allow-pct :fusebox/allow-pct :as s}]
+                                   (fn [{allow-pct ::allow-pct :as s}]
                                      (if (= curr-allow allow-pct)
                                        (or (process-transition s txn)
                                            s)
@@ -505,14 +497,14 @@
   nil)
 
 
-(defn allow? [{pct :fusebox/allow-pct}]
+(defn allow? [{pct ::allow-pct}]
   (or (= pct 100)
       (<= (.nextInt (ThreadLocalRandom/current)
                     101)
           pct)))
 
 
-(defn ratio-matching? [{r :fusebox/record} pred [n d]]
+(defn ratio-matching? [{r ::record} pred [n d]]
   (<= n
       (count (into []
                    (comp (take d)
@@ -536,9 +528,7 @@
   (identical? :failure k))
 
 
-(defn validate-circuit-breaker-spec [{sts :fusebox/states
-                                      allow :fusebox/allow-pct
-                                      record :fusebox/record}]
+(defn validate-circuit-breaker-states [states]
   (let [validate-txns (fn [s txns]
                         (mapcat (fn [{to :to
                                       pred :if :as t}]
@@ -547,7 +537,7 @@
                                       [{:err "No :if defined for transition."
                                         :transition t
                                         :state s}])
-                                    (when-not (get sts to)
+                                    (when-not (get states to)
                                       [{:err (str "No state definition for :to. This will "
                                                   "cause the state machine to stall.")
                                         :transition t
@@ -558,7 +548,7 @@
                          (concat
                            (when (and (= s 100)
                                       sched)
-                             [{:err (str ":schedule defined for :fusebox/allow-pct 100. "
+                             [{:err (str ":schedule defined for ::allow-pct 100. "
                                          "This will cause periodic unnecessary failure (but "
                                          "may be useful for dev or testing).")
                                :transition sched
@@ -575,7 +565,7 @@
                                  [{:err "Invalid :after definition. See the docstring for `convert."
                                    :transition sched
                                    :state s}])
-                               (when-not (get sts to)
+                               (when-not (get states to)
                                  [{:err (str "No state definition for :to. This will "
                                              "cause the state machine to stall in state " to ".")
                                    :transition sched
@@ -585,42 +575,48 @@
                          (concat
                            (validate-txns s txns)
                            (validate-sched s sched)))]
-    (seq (concat (when-not allow
-                   [{:err "No initial :fusebox/allow-pct defined."}])
-                 (when (and allow
-                            (not (get sts allow)))
-                   [{:err "No state definition for initial :fusebox/allow-pct."}])
-                 (when-not (instance? PersistentCircularBuffer record)
-                   [{:err "Invalid type for :fusebox/record. Must be a PersistentCircularBuffer."
-                     :record record
-                     :found-type (type record)}])
-                 (mapcat validate-state
-                         sts)))))
+    (mapcat validate-state
+            states)))
+
+
+(defn validate-circuit-breaker-spec [{sts ::states
+                                      allow ::allow-pct
+                                      record ::record}]
+  (seq (concat (when-not allow
+                 [{:err "No initial ::allow-pct defined."}])
+               (when (and allow
+                          (not (get sts allow)))
+                 [{:err "No state definition for initial ::allow-pct."}])
+               (when-not (instance? PersistentCircularBuffer record)
+                 [{:err "Invalid type for ::record. Must be a PersistentCircularBuffer."
+                   :record record
+                   :found-type (type record)}])
+               (validate-circuit-breaker-states sts))))
 
 
 (def defaults
-  {:fusebox/allow-pct 100
-   :fusebox/record (circular-buffer 128)
-   :fusebox/states {100 {:transitions [{:to 0
-                                        :if (fn [state]
-                                              (ratio-matching? state
-                                                               failure?
-                                                               [5 10]))}]}
+  {::allow-pct 100
+   ::record (circular-buffer 128)
+   ::states {100 {:transitions [{:to 0
+                                 :if (fn [state]
+                                       (ratio-matching? state
+                                                        failure?
+                                                        [5 10]))}]}
 
-                    50 {:schedule {:to 100
-                                   :after [1 :minute]
-                                   :if (fn [state]
-                                         (ratio-matching? state
-                                                          success?
-                                                          [10 10]))}
-                        :transitions [{:to 0
-                                       :if (fn [state]
-                                             (ratio-matching? state
-                                                              failure?
-                                                              [3 5]))}]}
+             50 {:schedule {:to 100
+                            :after [1 :minute]
+                            :if (fn [state]
+                                  (ratio-matching? state
+                                                   success?
+                                                   [10 10]))}
+                 :transitions [{:to 0
+                                :if (fn [state]
+                                      (ratio-matching? state
+                                                       failure?
+                                                       [3 5]))}]}
 
-                    0 {:schedule {:to 50
-                                  :after [1 :min]}}}})
+             0 {:schedule {:to 50
+                           :after [1 :min]}}}})
 
 
 (comment
@@ -645,7 +641,7 @@
   nil)
 
 
-(defn with-circuit-breaker* [{cb :fusebox/circuit-breaker :as spec} f]
+(defn with-circuit-breaker* [{cb ::circuit-breaker :as spec} f]
   (let [curr @cb]
     (if (allow? curr)
       (try-interruptible
@@ -653,15 +649,15 @@
           (record! cb :success)
           ret)
         (catch ExceptionInfo e
-          (when-not (:fusebox/ignore? (ex-data e))
+          (when-not (::ignore? (ex-data e))
             (record! cb :failure))
           (throw e))
         (catch Exception e
           (record! cb :failure)
           (throw e)))
       (throw (ex-info "fusebox circuit breaker open"
-                      {:fusebox/error :fusebox.error/circuit-breaker-open
-                       :fusebox/spec (pretty-spec spec)})))))
+                      {::error ::error-circuit-breaker-open
+                       ::spec (pretty-spec spec)})))))
 
 
 (defmacro with-circuit-breaker [spec & body]
@@ -669,8 +665,8 @@
                           (^{:once true} fn* [] ~@body)))
 
 
-(defn shutdown-spec [{cb :fusebox/circuit-breaker
-                      bh :fusebox/bulkhead}
+(defn shutdown-spec [{cb ::circuit-breaker
+                      bh ::bulkhead}
                      timeout]
   (when cb
     (shutdown-circuit-breaker cb))
@@ -678,7 +674,7 @@
     (shutdown-bulkhead bh timeout)))
 
 (defmacro bulwark [spec & body]
-  `(if (:fusebox/bulkhead ~spec)
+  `(if (::bulkhead ~spec)
      (with-retry ~spec
        (with-circuit-breaker ~spec
          (with-bulkhead ~spec
@@ -689,27 +685,27 @@
            ~@body)))))
 
 (comment
-  (def spec {:fusebox/circuit-breaker (circuit-breaker)
-             :fusebox/bulkhead (threadpool-bulkhead 1) #_(semaphore-bulkhead 1)
-             :fusebox/retry-delay (fn [retry-count exec-duration]
-                                    100
-                                    #_(jitter 0.80
-                                              (delay-exp retry-count)))
-             :fusebox/retry? (fn [retry-count exec-duration-ms last-error]
-                               (and (<= retry-count 4)
-                                    #_(<= exec-duration-ms
-                                          (convert [30 :seconds]
-                                                   :millis))))
-             :fusebox.bulkhead/offer-timeout [10 :ms]
-             :fusebox/exec-timeout [100 :ms]})
+  (def spec {::circuit-breaker (circuit-breaker)
+             ::bulkhead (threadpool-bulkhead 1) #_(semaphore-bulkhead 1)
+             ::retry-delay (fn [retry-count exec-duration]
+                             100
+                             #_(jitter 0.80
+                                       (delay-exp retry-count)))
+             ::retry? (fn [retry-count exec-duration-ms last-error]
+                        (and (<= retry-count 4)
+                             #_(<= exec-duration-ms
+                                   (convert [30 :seconds]
+                                            :millis))))
+             ::bulkhead-offer-timeout [10 :ms]
+             ::exec-timeout [100 :ms]})
 
   (shutdown-spec spec [1 :sec])
 
   (circuit-breaker)
-  (:fusebox/circuit-breaker spec)
-  (swap! (get spec :fusebox/circuit-breaker)
+  (::circuit-breaker spec)
+  (swap! (get spec ::circuit-breaker)
          assoc
-         :fusebox/allow-pct 50)
+         ::allow-pct 50)
   (bulwark spec
     (Thread/sleep 20))
 
@@ -726,5 +722,5 @@
     @f)
 
   (pretty-spec spec)
-  (shutdown-circuit-breaker (:fusebox/circuit-breaker spec))
+  (shutdown-circuit-breaker (::circuit-breaker spec))
   )

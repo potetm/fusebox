@@ -5,7 +5,7 @@
         org.clojure/tools.logging {:mvn/version "0.6.0"}}
 
  :aliases {:cursive {:extra-paths ["src/java"]}
-           :dev {:extra-paths ["dev" "dev-resources"]
+           :dev {:extra-paths ["dev" "dev-resources" "test"]
                  :extra-deps {nrepl/nrepl {:mvn/version "0.6.0"}
                               com.clojure-goes-fast/clj-memory-meter {:mvn/version "0.1.2"}
                               org.clojure/test.check {:mvn/version "1.0.0"}

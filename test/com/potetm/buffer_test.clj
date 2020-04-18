@@ -1,4 +1,4 @@
-(ns com.potetm.fusebox.buffer-test
+(ns com.potetm.buffer-test
   (:require
     [clojure.test :refer :all]
     [clojure.test.check.generators :as gen]
