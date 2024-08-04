@@ -7,10 +7,9 @@
   (:import
     (com.potetm.fusebox PersistentCircularBuffer)))
 
-(def coll (gen/vector gen/small-integer))
 
 (gtest/defspec reduce-test 10000
-  (prop/for-all [c coll]
+  (prop/for-all [c (gen/vector gen/nat)]
     (= (reduce +
                c)
        (reduce +
@@ -18,7 +17,7 @@
                      c)))))
 
 (gtest/defspec reduce-with-initial-test 10000
-  (prop/for-all [c coll]
+  (prop/for-all [c (gen/vector gen/nat)]
     (= (reduce +
                5
                c)

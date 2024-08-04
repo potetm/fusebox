@@ -1,27 +1,34 @@
 (ns com.potetm.fusebox
-  (:require
-    [clojure.edn :as edn]
-    [clojure.java.io :as io]
-    [clojure.tools.logging :as log]
-    [clojure.walk :as walk])
+  (:refer-clojure :exclude [memoize])
   (:import
-    (clojure.lang ExceptionInfo
-                  Var)
-    (com.potetm.fusebox PersistentCircularBuffer)
-    (java.util.concurrent BlockingQueue
-                          Executors
+    (clojure.lang Var)
+    (java.time Duration Instant)
+    (java.util.concurrent ConcurrentHashMap Executors
                           ExecutorService
-                          Future
-                          RejectedExecutionException
-                          ScheduledThreadPoolExecutor
                           Semaphore
-                          SynchronousQueue
                           ThreadFactory
                           ThreadLocalRandom
-                          ThreadPoolExecutor
                           TimeoutException
                           TimeUnit)
-    (java.util.concurrent.atomic AtomicLong)))
+    (java.util.concurrent.atomic AtomicLong)
+    (java.util.function Function)))
+
+
+(set! *warn-on-reflection* true)
+
+
+(defn class-for-name [n]
+  (try
+    (Class/forName n)
+    (catch ClassNotFoundException _)))
+
+
+(def virtual-threadpool
+  (when (class-for-name "java.lang.VirtualThread")
+    (eval '(Executors/newThreadPerTaskExecutor (-> (Thread/ofVirtual)
+                                                   (.name "fusebox-thread-" 1)
+                                                   (.factory))))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Unit Conversion                                                            ;;
@@ -49,13 +56,19 @@
          (zipmap [:d :day :days]
                  (repeat TimeUnit/DAYS))))
 
+
 (defn unit ^TimeUnit [kw]
   (unit* kw))
+
 
 (defn convert ^long [[v orig] target]
   (.convert (unit target)
             v
             (unit orig)))
+
+
+(defn ms ^long [unit]
+  (convert unit :ms))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Utilities                                                                  ;;
@@ -87,18 +100,6 @@
        ~@catches+finally)))
 
 
-(defn circular-buffer [size]
-  (PersistentCircularBuffer. size))
-
-
-(defn num-items
-  "Get the number of non-nil items in constant time.
-
-  Note this is different than the size of the buffer, which is fixed."
-  [^PersistentCircularBuffer buff]
-  (.numItems buff))
-
-
 (defn pretty-spec
   ([spec]
    (dissoc spec
@@ -108,28 +109,21 @@
            ::bulkhead)))
 
 
-(def edn-props
-  (when-some [url (io/resource "fusebox.edn")]
-    (edn/read-string (slurp url))))
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Timeout                                                                    ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defonce ^{:doc "An unbound threadpool used for reliably timing out calls."
            :private true}
-         timeout-threadpool
-         (delay (let [tc (AtomicLong. -1)
-                      ^ExecutorService exec
-                      (Executors/newCachedThreadPool
-                        (reify ThreadFactory
-                          (newThread [this r]
-                            (doto (Thread. r)
-                              (.setName (str "fusebox-timeout-scheduler-thread-"
-                                             (.incrementAndGet tc)))
-                              (.setDaemon true)))))]
-                  exec)))
+  timeout-threadpool
+  (delay (or virtual-threadpool
+             (Executors/newCachedThreadPool (let [tc (AtomicLong. -1)]
+                                              (reify ThreadFactory
+                                                (newThread [this r]
+                                                  (doto (Thread. r)
+                                                    (.setName (str "fusebox-thread-"
+                                                                   (.incrementAndGet tc)))
+                                                    (.setDaemon true)))))))))
 
 (defn timeout* [{to ::exec-timeout
                  intr? ::interrupt?
@@ -263,136 +257,84 @@
            (fn [] ~@body)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Rate Limit                                                                 ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn rate-limiter [{n ::bucket-size
+                     p ::period-ms :as opts}]
+  (let [sem (Semaphore. n)
+        release (fn []
+                  (let [ns (convert [p :ms] :ns)]
+                    (while true
+                      (Thread/sleep (Duration/ofNanos ns))
+                      (.release sem
+                                ;; This isn't atomic, but the worst case
+                                ;; isn't terrible: might be a couple of tokens
+                                ;; short for one cycle.
+                                (- n (.availablePermits sem))))))]
+    (merge opts
+           {::sem sem
+            ::bg-thread
+            (if (class-for-name "java.lang.VirtualThread")
+              (eval
+                '(-> (Thread/ofVirtual)
+                     (.name "rate-limiter-bg-thread")
+                     (.start release)))
+              (doto (Thread. ^Runnable release)
+                (.setName "rate-limiter-bg-thread")
+                (.setDaemon true)
+                (.start)))})))
+
+
+(defn shutdown [{bg ::bg-thread}]
+  (.interrupt ^Thread bg))
+
+
+(defn rate-limit* [{^Semaphore s ::sem
+                    to ::timeout-ms}
+                   f]
+  (when s
+    (when-not (.tryAcquire s
+                           to
+                           TimeUnit/MILLISECONDS)
+      (throw (ex-info "Timeout waiting for rate limiter"
+                      {::timeout-ms to}))))
+  (f))
+
+
+(defmacro with-rate-limit [spec & body]
+  `(rate-limit* ~spec
+                (^{:once true} fn* [] ~@body)))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Bulkhead                                                                   ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defprotocol IBulkhead
-  (-run [this f spec]))
+(defn bulkhead [^long concurrency]
+  {::conc concurrency
+   ::sem (Semaphore. concurrency)})
 
 
-(defprotocol IShutdown
-  (-shutdown [this timeout]))
+(defn shutdown-bulkhead [{^Semaphore s ::sem}]
+  ;; Don't allow any more processes to acquire any more permits
+  (.drainPermits s))
 
 
-(def ^{:dynamic true
-       :private true} *offer-timeout* nil)
-
-
-(defn ^BlockingQueue timed-offer-queue []
-  (proxy [SynchronousQueue] [true]
-    (offer [e]
-      (if *offer-timeout*
-        (proxy-super offer
-                     e
-                     (convert *offer-timeout*
-                              :ns)
-                     (unit :ns))
-        (proxy-super offer e)))))
-
-
-(defrecord ThreadpoolBulkhead [concurrency ^ExecutorService exec]
-  IBulkhead
-  (-run [this
-         {offer-to ::bulkhead-offer-timeout
-          exec-to ::exec-timeout
-          intr? ::interrupt?
-          :or {intr? true}
-          :as spec}
-         f]
-    (let [^Callable f (convey-bindings f)
-          ^Future fut (if offer-to
-                        (try (binding [*offer-timeout* offer-to]
-                               (.submit ^ExecutorService exec
-                                        f))
-                             (catch RejectedExecutionException rje
-                               (throw (ex-info "fusebox timeout"
-                                               {::error ::error-offer-timeout
-                                                ::spec (pretty-spec spec)}))))
-                        (.submit ^ExecutorService exec
-                                 f))]
-      (if exec-to
-        (try (.get fut
-                   (convert exec-to :ns)
-                   (unit :ns))
-             (catch TimeoutException to
-               (.cancel fut intr?)
-               (throw (ex-info "fusebox timeout"
-                               {::error ::error-exec-timeout
-                                ::spec (pretty-spec spec)}))))
-        (.get fut))))
-  IShutdown
-  (-shutdown [this timeout]
-    (.shutdownNow ^ExecutorService exec)
-    (.awaitTermination exec
-                       (convert timeout :ns)
-                       (unit :ns))))
-
-
-(defn threadpool-bulkhead [^long concurrency]
-  (let [exec (ThreadPoolExecutor.
-               concurrency
-               concurrency
-               0 (unit :ms)
-               (timed-offer-queue)
-               (let [tc (AtomicLong. -1)]
-                 (reify ThreadFactory
-                   (newThread [this r]
-                     (doto (Thread. r)
-                       (.setName (str "fusebox-bulkhead-threadpool-"
-                                      (.incrementAndGet tc)))
-                       (.setDaemon true))))))]
-    (->ThreadpoolBulkhead concurrency
-                          exec)))
-
-
-(defrecord SemaphoreBulkhead [concurrency ^Semaphore s]
-  IBulkhead
-  (-run [this
-         {offer-to ::bulkhead-offer-timeout
-          exec-to ::exec-timeout :as spec}
-         f]
-    (when exec-to
-      (throw (UnsupportedOperationException.
-               (str "SemaphoreBulkhead does not support an exec-timeout. "
-                    "There is no reliable way in the JVM to guarantee that execution "
-                    "halts. Using ThreadpoolBulkhead at least guarantees that "
-                    "you only have N processes running at the same time.\n\n"
-                    "You can use with-timeout if you like, but know that "
-                    "with-timeout runs on an unbound threadpool, and, again, "
-                    "there's no way to reliably halt execution."))))
-    (if offer-to
-      (when-not (.tryAcquire s
-                             (convert offer-to :ns)
-                             (unit :ns))
-        (throw (ex-info "fusebox timeout"
-                        {::error ::error-offer-timeout
-                         ::spec (pretty-spec spec)})))
-      (.acquire s))
-    (try (f)
-         (finally
-           (.release s))))
-  IShutdown
-  (-shutdown [this timeout]
-    ;; Don't allow any more processes to acquire any more permits
-    ;; by acquiring all permits and not releasing them.
-    (.tryAcquire s
-                 concurrency
-                 (convert timeout :ns)
-                 (unit :ns))))
-
-
-(defn semaphore-bulkhead [^long concurrency]
-  (->SemaphoreBulkhead concurrency
-                       (Semaphore. concurrency)))
-
-
-(defn shutdown-bulkhead [bh timeout]
-  (-shutdown bh timeout))
-
-
-(defn with-bulkhead* [{bh ::bulkhead :as spec}
+(defn with-bulkhead* [{^Semaphore s ::sem
+                       to ::timeout :as spec}
                       f]
-  (-run bh spec f))
+  (when s
+    (if (.tryAcquire s
+                     to
+                     TimeUnit/MILLISECONDS)
+      (try (f)
+           (finally
+             (.release s)))
+      (throw (ex-info "fusebox timeout"
+                      {::error ::error-offer-timeout
+                       ::spec (pretty-spec spec)})))))
 
 
 (defmacro with-bulkhead [spec & body]
@@ -403,261 +345,194 @@
 ;; Circuit Breaker                                                            ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defonce ^{:tag ScheduledThreadPoolExecutor
-           :private true}
-         circuit-breaker-scheduler
-         (delay (let [tc (AtomicLong. -1)
-                      ^ScheduledThreadPoolExecutor exec
-                      (Executors/newScheduledThreadPool
-                        (or (::circuit-breaker-scheduler-num-threads edn-props)
-                            1)
-                        (reify ThreadFactory
-                          (newThread [this r]
-                            (doto (Thread. r)
-                              (.setName (str "fusebox-circuit-breaker-scheduler-thread-"
-                                             (.incrementAndGet tc)))
-                              (.setDaemon true)))))]
-                  exec)))
+(defn time-expired? [{^Instant lta :last-transition-at} duration-ms]
+  (.isAfter (Instant/now)
+            (.plusMillis lta duration-ms)))
 
 
-(defn record [spec event-type]
-  (update spec
-          ::record
-          conj
-          event-type))
+(defn slow-pct [{sc :slow-count
+                 tc :total-count}]
+  (double (/ sc tc)))
 
 
-(defn process-transition [{r ::record :as s}
-                          {t :to
-                           pred :if}]
-  (when (pred s)
-    (assoc s
-      ::allow-pct t
-      ::record (empty r))))
+(defn fail-pct [{fc :failed-count
+                 tc :total-count}]
+  (double (/ fc tc)))
 
 
-(defn transition [{prev ::allow-pct
-                   trns ::states :as s}]
-  (or (some (partial process-transition s)
-            (get-in trns
-                    [prev :transitions]))
-      s))
+(defn slow|fail-pct [{fc :failed-count
+                      sc :slow-count
+                      tc :total-count}]
+  (double (/ (+ fc sc)
+             tc)))
 
 
-(defn- schedule!
-  ([cb [prev curr]]
-   (schedule! cb prev curr))
-  ([cb
-    {prev-allow ::allow-pct}
-    {curr-allow ::allow-pct :as s}]
-   (when (not= prev-allow
-               curr-allow)
-     (when-some [{a :after :as txn} (get-in s
-                                            [::states
-                                             curr-allow
-                                             :schedule])]
-       (let [^Callable sched
-             (fn sched []
-               (try
-                 (let [[{prev-pct ::allow-pct :as prev}
-                        new]
-                       (swap-vals! cb
-                                   (fn [{allow-pct ::allow-pct :as s}]
-                                     (if (= curr-allow allow-pct)
-                                       (or (process-transition s txn)
-                                           s)
-                                       ;; intervening transition, our transition
-                                       ;; is not applicable.
-                                       s)))]
-                   (when (and
-                           ;; No intervening transition.
-                           (= curr-allow prev-pct)
-                           ;; No transition occurred
-                           (= prev new))
-                     ;; validation error, transition to self, re-schedule scheduled transition
-                     (.schedule @circuit-breaker-scheduler
-                                ^Callable sched
-                                ^long (convert a :nanos)
-                                TimeUnit/NANOSECONDS)))
-                 (catch Exception e
-                   (log/error "error in scheduler"
-                              e
-                              txn))))]
-         (.schedule @circuit-breaker-scheduler
-                    sched
-                    ^long (convert a :nanos)
-                    TimeUnit/NANOSECONDS)
-         nil)))))
+(defn should-open? [{s :state
+                     tc :total-count :as cb}
+                    fail-threshold
+                    slow-threshold]
+  (and (pos? tc)
+       (or (= s :half-opened)
+           (= s :closed))
+       (< fail-threshold (fail-pct cb))
+       (< slow-threshold (slow-pct cb))))
 
 
-(defn record! [cb event]
-  (swap! cb
-         (comp transition record)
-         event)
-  nil)
+(defn should-close? [{s :state
+                      tc :total-count :as cb}
+                     wait-for
+                     fail-threshold
+                     slow-threshold]
+  (and (pos? tc)
+       (= s :half-opened)
+       (<= wait-for tc)
+       (< (fail-pct cb) fail-threshold)
+       (< (slow-pct cb) slow-threshold)))
 
 
-(defn allow? [{pct ::allow-pct}]
-  (or (= pct 100)
-      (<= (.nextInt (ThreadLocalRandom/current)
-                    101)
-          pct)))
+(defn default-next-state [{fp :fail-pct
+                           sp :slow-pct
+                           howf :half-open-wait-for-count
+                           hoa :open->half-open-after-ms}
+                          {s :state :as cb}]
+  (cond
+    (and (= s :opened)
+         (time-expired? cb hoa))
+    :half-opened
+
+    (should-open? cb fp sp)
+    :opened
+
+    (should-close? cb howf fp sp)
+    :closed))
 
 
-(defn ratio-matching? [{r ::record} pred [n d]]
-  (<= n
-      (count (into []
-                   (comp (take d)
-                         (filter pred))
-                   (rseq r)))))
+(defn circuit-breaker [{rs ::hist-size
+                        succ? ::success? :as spec}]
+  {::circuit-breaker (atom (merge {:record (vec (repeat rs
+                                                        {:fails 0
+                                                         :slows 0}))
+                                   :record-idx 0
+                                   :state :closed
+                                   :slow-count 0
+                                   :failed-count 0
+                                   :total-count 0}
+                                  spec))
+   ;; putting this here makes it easier to access in with-circuit-breaker*
+   ::success? (or succ? (fn [_] true))})
 
 
-(defn success?
-  "Is k the :success keyword?
-
-  This exists primarily to avoid constant re-allocation of a hot function."
-  [k]
-  (identical? :success k))
-
-
-(defn failure?
-  "Is k the :failure keyword?
-
-  This exists primarily to avoid constant re-allocation of a hot function."
-  [k]
-  (identical? :failure k))
+(defn half-open-allow? [cba]
+  (let [[{old :half-open-count} _new]
+        (swap-vals! cba
+                    (fn [{hoc :half-open-count :as s}]
+                      (if (zero? hoc)
+                        s
+                        (assoc s :half-open-count (dec hoc)))))]
+    (pos? old)))
 
 
-(defn validate-circuit-breaker-states [states]
-  (let [validate-txns (fn [s txns]
-                        (mapcat (fn [{to :to
-                                      pred :if :as t}]
-                                  (concat
-                                    (when-not pred
-                                      [{:err "No :if defined for transition."
-                                        :transition t
-                                        :state s}])
-                                    (when-not (get states to)
-                                      [{:err (str "No state definition for :to. This will "
-                                                  "cause the state machine to stall.")
-                                        :transition t
-                                        :state s}])))
-                                txns))
-        validate-sched (fn [s {a :after
-                               to :to :as sched}]
-                         (concat
-                           (when (and (= s 100)
-                                      sched)
-                             [{:err (str ":schedule defined for ::allow-pct 100. "
-                                         "This will cause periodic unnecessary failure (but "
-                                         "may be useful for dev or testing).")
-                               :transition sched
-                               :state s}])
-                           (when-not (= s 100)
-                             (concat
-                               (when-not a
-                                 [{:err "No :after defined for scheduled transition."
-                                   :transition sched
-                                   :state s}])
-                               (when (and a
-                                          (not (try (convert a :nanos)
-                                                    (catch Exception e))))
-                                 [{:err "Invalid :after definition. See the docstring for `convert."
-                                   :transition sched
-                                   :state s}])
-                               (when-not (get states to)
-                                 [{:err (str "No state definition for :to. This will "
-                                             "cause the state machine to stall in state " to ".")
-                                   :transition sched
-                                   :state s}])))))
-        validate-state (fn [[s {sched :schedule
-                                txns :transitions}]]
-                         (concat
-                           (validate-txns s txns)
-                           (validate-sched s sched)))]
-    (mapcat validate-state
-            states)))
+(defn transition [prev state]
+  (cond-> (assoc prev
+            :record (vec (repeat (if (= state :half-opened)
+                                   (::half-open-tries prev)
+                                   (::hist-size prev))
+                                 {:fails 0
+                                  :slows 0}))
+            :record-idx 0
+            :state state
+            :slow-count 0
+            :failed-count 0
+            :total-count 0
+            :last-transition-at (Instant/now))
+
+    (= state :half-opened)
+    (assoc
+      :half-open-count (::half-open-tries prev))))
 
 
-(defn validate-circuit-breaker-spec [{sts ::states
-                                      allow ::allow-pct
-                                      record ::record}]
-  (seq (concat (when-not allow
-                 [{:err "No initial ::allow-pct defined."}])
-               (when (and allow
-                          (not (get sts allow)))
-                 [{:err "No state definition for initial ::allow-pct."}])
-               (when-not (instance? PersistentCircularBuffer record)
-                 [{:err "Invalid type for ::record. Must be a PersistentCircularBuffer."
-                   :record record
-                   :found-type (type record)}])
-               (validate-circuit-breaker-states sts))))
+(defn allow? [cba]
+  (let [{s :state
+         next-state ::next-state :as cb} @cba]
+    (boolean
+      (or (= s :closed)
+          (and (= s :half-opened)
+               (half-open-allow? cba))
+          (and (when-some [s' (next-state cb)]
+                 (let [{s :state} (swap! cba
+                                         (fn [{s :state :as cb}]
+                                           (if (= s s')
+                                             cb
+                                             (transition cb s'))))]
+                   (or (and (= s :half-opened)
+                            (half-open-allow? cba))
+                       (= s :closed)))))))))
 
 
-(def defaults
-  {::allow-pct 100
-   ::record (circular-buffer 128)
-   ::states {100 {:transitions [{:to 0
-                                 :if (fn [state]
-                                       (ratio-matching? state
-                                                        failure?
-                                                        [5 10]))}]}
-
-             50 {:schedule {:to 100
-                            :after [1 :minute]
-                            :if (fn [state]
-                                  (ratio-matching? state
-                                                   success?
-                                                   [10 10]))}
-                 :transitions [{:to 0
-                                :if (fn [state]
-                                      (ratio-matching? state
-                                                       failure?
-                                                       [3 5]))}]}
-
-             0 {:schedule {:to 50
-                           :after [1 :min]}}}})
-
-
-(comment
-  (validate-circuit-breaker-spec
-    defaults))
-
-(defn circuit-breaker
-  ([]
-   (circuit-breaker {}))
-  ([init]
-   (let [cb (atom (merge defaults
-                         init))]
-     (add-watch cb
-                ::schedule-transition
-                (fn [_k _cb old new]
-                  (schedule! cb old new)))
-     cb)))
+;; defn so we avoid allocation another anonymous function on every call
+(defn record!* [{r :record
+                 i :record-idx
+                 rs ::hist-size
+                 sc :slow-count
+                 fc :failed-count
+                 tc :total-count
+                 scms ::slow-call-ms
+                 next-state ::next-state :as cb} res duration-ms]
+  (let [{prev-f :fails
+         prev-s :slows} (get r i)
+        fails (if (= res :failure)
+                1
+                0)
+        slows (if (< scms duration-ms)
+                1
+                0)
+        fc' (- (+ fc fails)
+               prev-f)
+        sc' (- (+ sc slows)
+               prev-s)
+        tc' (min (inc tc) rs)
+        cb' (assoc cb
+              :record (assoc r
+                        i {:fails fails
+                           :slows slows})
+              :record-idx (mod (inc i) rs)
+              :failed-count fc'
+              :slow-count sc'
+              :total-count tc')
+        s' (next-state cb')]
+    (cond-> cb'
+      s' (transition s'))))
 
 
-(defn shutdown-circuit-breaker [cb]
-  (remove-watch cb ::schedule-transition)
-  nil)
+(defn record! [cba res duration-ms]
+  (swap! cba
+         record!*
+         res
+         duration-ms))
 
 
-(defn with-circuit-breaker* [{cb ::circuit-breaker :as spec} f]
-  (let [curr @cb]
-    (if (allow? curr)
+(defn with-circuit-breaker* [{cb ::circuit-breaker
+                              succ? ::success? :as spec} f]
+  (if (allow? cb)
+    (let [start (Instant/now)]
       (try-interruptible
         (let [ret (f)]
-          (record! cb :success)
+          (record! cb
+                   (if (succ? ret)
+                     :success
+                     :failure)
+                   (.toMillis (Duration/between start
+                                                (Instant/now))))
           ret)
-        (catch ExceptionInfo e
-          (when-not (::ignore? (ex-data e))
-            (record! cb :failure))
-          (throw e))
         (catch Exception e
-          (record! cb :failure)
-          (throw e)))
-      (throw (ex-info "fusebox circuit breaker open"
-                      {::error ::error-circuit-breaker-open
-                       ::spec (pretty-spec spec)})))))
+          (record! cb
+                   :failure
+                   (.toMillis (Duration/between start
+                                                (Instant/now))))
+          (throw e))))
+    (throw (ex-info "fusebox circuit breaker open"
+                    {::error ::error-circuit-breaker-open
+                     ::spec (pretty-spec spec)}))))
 
 
 (defmacro with-circuit-breaker [spec & body]
@@ -665,26 +540,45 @@
                           (^{:once true} fn* [] ~@body)))
 
 
-(defn shutdown-spec [{cb ::circuit-breaker
-                      bh ::bulkhead}
-                     timeout]
-  (when cb
-    (shutdown-circuit-breaker cb))
-  (when bh
-    (shutdown-bulkhead bh timeout)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Memoize                                                                    ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defmacro bulwark [spec & body]
-  `(if (::bulkhead ~spec)
-     (with-retry ~spec
-       (with-circuit-breaker ~spec
-         (with-bulkhead ~spec
-           ~@body)))
-     (with-retry ~spec
-       (with-circuit-breaker ~spec
-         (with-timeout ~spec
-           ~@body)))))
+
+(defn memoize
+  ([f]
+   (memoize f nil))
+  ([f default]
+   {::chm (ConcurrentHashMap.)
+    ::fn f
+    ::default default}))
+
+
+(defn memo [{^ConcurrentHashMap chm ::chm
+             f ::fn
+             d ::default} & args]
+  (or (.computeIfAbsent chm
+                        args
+                        (reify Function
+                          (apply [this args]
+                            (apply f args))))
+      d))
 
 (comment
+  @(def cb
+     (circuit-breaker {::next-state (partial default-next-state
+                                             {:fail-pct 0.5
+                                              :half-open-wait-for-count 10
+                                              :open->half-open-after-ms 10000})
+                       ::half-open-tries 10
+                       ::hist-size 10
+                       ::slow-call-ms 5000}))
+  @cb
+  (allow? cb)
+  ((::next-state @cb) @cb)
+  (record! cb :success 1000)
+  (record! cb :failure 1000)
+
   (def spec {::circuit-breaker (circuit-breaker)
              ::bulkhead (threadpool-bulkhead 1) #_(semaphore-bulkhead 1)
              ::retry-delay (fn [retry-count exec-duration]
@@ -707,11 +601,11 @@
          assoc
          ::allow-pct 50)
   (bulwark spec
-    (Thread/sleep 20))
+           (Thread/sleep 20))
 
   (macroexpand-1
     '(bulwark spec
-       (Thread/sleep 20)))
+              (Thread/sleep 20)))
 
   (doseq [f [(future (with-bulkhead spec
                        (Thread/sleep 100)

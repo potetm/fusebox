@@ -38,6 +38,30 @@
   (def buf (fb/circuit-breaker {::record (PersistentCircularBuffer. 32)}))
 
   (fb/bulwark)
+  [(transduce (comp (take d)
+                    (filter pred))
+              (completing (fn [c _]
+                            (inc c)))
+              0
+              r)
+   (count (into []
+                (comp (take d)
+                      (filter pred))
+                r))]
+  (let [r (range 1000)
+        d 100
+        pred odd?]
+    (n-times 100000
+            #_(count (into []
+                          (comp (take d)
+                                (filter pred))
+                          r))
+             (transduce (comp (take d)
+                              (filter pred))
+                        (completing (fn [c _]
+                                      (inc c)))
+                        0
+                        r)))
 
   (with-redefs [fb/record (fn [spec event-type]
                             (update spec
@@ -45,7 +69,7 @@
                                     conj
                                     event-type))]
     (n-times 1000000
-      (fb/record! buf :success)))
+             (fb/record! buf :success)))
   ; Average ns:  1587.840109
 
   (:fusebox/record @buf)
@@ -63,7 +87,7 @@
                                     lim
                                     event-type))]
     (n-times 1000000
-      (fb/record! v :success)))
+             (fb/record! v :success)))
   ; Average ns:  2138.798864
 
   (::record @v)
