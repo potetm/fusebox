@@ -1,9 +1,6 @@
 (ns dev.benchmark
   (:require
-    [clj-memory-meter.core :as mm]
-    [com.potetm.fusebox :as fb])
-  (:import
-    (com.potetm.fusebox PersistentCircularBuffer)))
+    [com.potetm.fusebox.circuit-breaker :as cb]))
 
 
 (defmacro n-times [times & body]
@@ -35,65 +32,18 @@
 
 (comment
 
-  (def buf (fb/circuit-breaker {::record (PersistentCircularBuffer. 32)}))
+  (def cb (cb/circuit-breaker {::cb/next-state (partial cb/next-state:default
+                                                        {:fail-pct 0.5
+                                                         :slow-pct 0.5
+                                                         :wait-for-count 3
+                                                         :open->half-open-after-ms 100})
+                               ::cb/hist-size 10
+                               ::cb/half-open-tries 3
+                               ::cb/slow-call-ms 100}))
 
-  (fb/bulwark)
-  [(transduce (comp (take d)
-                    (filter pred))
-              (completing (fn [c _]
-                            (inc c)))
-              0
-              r)
-   (count (into []
-                (comp (take d)
-                      (filter pred))
-                r))]
-  (let [r (range 1000)
-        d 100
-        pred odd?]
-    (n-times 100000
-            #_(count (into []
-                          (comp (take d)
-                                (filter pred))
-                          r))
-             (transduce (comp (take d)
-                              (filter pred))
-                        (completing (fn [c _]
-                                      (inc c)))
-                        0
-                        r)))
-
-  (with-redefs [fb/record (fn [spec event-type]
-                            (update spec
-                                    ::record
-                                    conj
-                                    event-type))]
-    (n-times 1000000
-             (fb/record! buf :success)))
-  ; Average ns:  1587.840109
-
-  (:fusebox/record @buf)
-  (mm/measure (:fusebox/record @buf)
-              :debug true)
-  ; => "560 B"
-
-  (def v (fb/circuit-breaker {::record-limit 32
-                              ::record []}))
-
-  (with-redefs [fb/record (fn [{lim ::record-limit :as spec} event-type]
-                            (update spec
-                                    ::record
-                                    sliding-vec-conj
-                                    lim
-                                    event-type))]
-    (n-times 1000000
-             (fb/record! v :success)))
-  ; Average ns:  2138.798864
-
-  (::record @v)
-  (mm/measure (::record @v))
-  ; => "31.0 MB"
-
-  (mm/measure (into [] (repeat 128 :success)))
-
-  (mm/measure))
+  (def cba (::cb/circuit-breaker cb))
+  (n-times 1000000
+           (cb/record! cba
+                       :success
+                       10))
+  )
