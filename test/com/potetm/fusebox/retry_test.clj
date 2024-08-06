@@ -95,4 +95,14 @@
                     "exec-duration-ms only increases"))
               (throw (ex-info "" {}))))
           (catch ExceptionInfo ei
-            ::fail))))))
+            ::fail)))))
+
+
+  (testing "noop"
+    (is (= 123
+           (retry/with-retry {:something 'else}
+             123)))
+
+    (is (= 123
+           (retry/with-retry nil
+             123)))))

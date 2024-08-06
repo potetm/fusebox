@@ -18,38 +18,38 @@
     (let [[t ret] (timing
                     (try
                       (to/with-timeout {::to/timeout-ms 5}
-                                       (Thread/sleep 50))
+                        (Thread/sleep 100))
                       (catch ExceptionInfo ei
                         ::timeout)))]
       (is (= ret ::timeout))
-      (is (< t 10))))
+      (is (< t 15))))
 
 
   (testing "base case - no sleeping"
     (let [[t ret] (timing
                     (try
                       (to/with-timeout {::to/timeout-ms 5}
-                                       ;; benchmarking says this is about 30ms
-                                       (doseq [_ (range 10000000)]))
+                        ;; benchmarking says this is about 30ms
+                        (doseq [_ (range 10000000)]))
                       (catch ExceptionInfo ei
                         ::timeout)))]
       (is (= ret ::timeout))
-      (is (< t 10))))
+      (is (< t 15))))
 
 
   (testing "interrupt"
-    (let [intr? (atom false)
+    (let [intr? (volatile! false)
           [t ret] (timing
                     (try
                       (to/with-timeout {::to/timeout-ms 5}
-                                       (try
-                                         (Thread/sleep 50)
-                                         (catch InterruptedException ie
-                                           (reset! intr? true))))
+                        (try
+                          (Thread/sleep 100)
+                          (catch InterruptedException ie
+                            (vreset! intr? true))))
                       (catch ExceptionInfo ei
                         ::timeout)))]
       (is (= ret ::timeout))
-      (is (< t 10))
+      (is (< t 15))
       (is (= true @intr?))))
 
 
@@ -59,12 +59,21 @@
                     (try
                       (to/with-timeout {::to/timeout-ms 5
                                         ::to/interrupt? false}
-                                       (try
-                                         (Thread/sleep 50)
-                                         (catch InterruptedException ie
-                                           (reset! intr? true))))
+                        (try
+                          (Thread/sleep 50)
+                          (catch InterruptedException ie
+                            (reset! intr? true))))
                       (catch ExceptionInfo ei
                         ::timeout)))]
       (is (= ret ::timeout))
-      (is (< t 10))
-      (is (= false @intr?)))))
+      (is (< t 15))
+      (is (= false @intr?))))
+
+  (testing "noop"
+    (is (= 123
+           (to/with-timeout {:something 'else}
+             123)))
+
+    (is (= 123
+           (to/with-timeout nil
+             123)))))

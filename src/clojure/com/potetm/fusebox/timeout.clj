@@ -1,7 +1,9 @@
 (ns com.potetm.fusebox.timeout
   (:require
+    [com.potetm.fusebox :as-alias fb]
     [com.potetm.fusebox.util :as util])
   (:import
+    (java.time Duration)
     (java.util.concurrent ExecutorService
                           Executors
                           ThreadFactory
@@ -13,17 +15,9 @@
 (set! *warn-on-reflection* true)
 
 
-(def virtual-exec
-  (when (util/class-for-name "java.lang.VirtualThread")
-    (eval '(Executors/newThreadPerTaskExecutor (-> (Thread/ofVirtual)
-                                                   (.name "fusebox-thread-" 1)
-                                                   (.factory))))))
-
-
-(defonce ^{:doc "An unbound threadpool used for reliably timing out calls."
-           :private true}
+(defonce ^:private
   timeout-threadpool
-  (delay (or virtual-exec
+  (delay (or util/virtual-exec
              (Executors/newCachedThreadPool (let [tc (AtomicLong. -1)]
                                               (reify ThreadFactory
                                                 (newThread [this r]
@@ -38,20 +32,23 @@
                  :or {intr? true}
                  :as spec}
                 f]
-  (let [fut (.submit ^ExecutorService @timeout-threadpool
-                     ^Callable (util/convey-bindings f))]
-    (try
-      (.get fut
-            to
-            TimeUnit/MILLISECONDS)
-      (catch InterruptedException ie
-        (.cancel fut intr?)
-        (throw ie))
-      (catch TimeoutException to
-        (.cancel fut intr?)
-        (throw (ex-info "fusebox timeout"
-                        {::error ::error-exec-timeout
-                         ::spec (util/pretty-spec spec)}))))))
+  (if-not to
+    (f)
+    (let [fut (.submit ^ExecutorService @timeout-threadpool
+                       ^Callable (util/convey-bindings f))]
+      (try
+        (.get fut
+              to
+              TimeUnit/MILLISECONDS)
+        ;; This *mustn't* be a try-interruptible because we need to cancel the future.
+        (catch InterruptedException ie
+          (.cancel fut intr?)
+          (throw ie))
+        (catch TimeoutException to
+          (.cancel fut intr?)
+          (throw (ex-info "fusebox timeout"
+                          {::fb/error ::exec-timeout
+                           ::fb/spec (util/pretty-spec spec)})))))))
 
 
 (defmacro with-timeout

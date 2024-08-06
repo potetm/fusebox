@@ -1,5 +1,6 @@
 (ns com.potetm.fusebox.rate-limit
   (:require
+    [com.potetm.fusebox :as-alias fb]
     [com.potetm.fusebox.util :as util])
   (:import
     (java.util.concurrent ExecutorService
@@ -12,17 +13,6 @@
 (set! *warn-on-reflection* true)
 
 
-;; No point in allocating a new virtual executor on every invocation. It will
-;; always spawn a new thread per task, so might as well share the startup
-;; overhead AND allow people to precompile without eval.
-(def virtual-exec
-  (when (util/class-for-name "java.lang.VirtualThread")
-    (eval '(Executors/newThreadPerTaskExecutor
-             (-> (Thread/ofVirtual)
-                 (.name "rate-limiter-bg-thread" 1)
-                 (.factory))))))
-
-
 (defn rate-limiter [{n ::bucket-size
                      p ::period-ms :as opts}]
   (let [sem (Semaphore. n)
@@ -30,7 +20,7 @@
         ;; lets us use eval without local bindings. Should be no functional
         ;; difference, and still lets us use Virtual Threads when available.
         ^ExecutorService exec
-        (or virtual-exec
+        (or util/virtual-exec
             (Executors/newSingleThreadExecutor
               (reify ThreadFactory
                 (newThread [this r]
@@ -52,14 +42,16 @@
 
 
 (defn rate-limit* [{^Semaphore s ::sem
-                    to ::timeout-ms}
+                    to ::wait-timeout-ms :as spec}
                    f]
   (when s
     (when-not (.tryAcquire s
                            to
                            TimeUnit/MILLISECONDS)
       (throw (ex-info "Timeout waiting for rate limiter"
-                      {::timeout-ms to}))))
+                      {::fb/error ::timeout-waiting-for-rate-limiter
+                       ::fb/spec spec
+                       ::wait-timeout-ms to}))))
   (f))
 
 
@@ -69,13 +61,13 @@
 
 
 (defn shutdown [{^ExecutorService bg ::bg-exec}]
-  (when (not= bg virtual-exec)
+  (when (not= bg util/virtual-exec)
     (.shutdownNow bg)))
 
 
 (comment
   (def rl (rate-limiter {::bucket-size 2
                          ::period-ms 100
-                         ::timeout-ms 500}))
+                         ::wait-timeout-ms 500}))
   (shutdown rl)
   )

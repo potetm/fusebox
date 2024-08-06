@@ -1,5 +1,6 @@
 (ns com.potetm.fusebox.retry
   (:require
+    [com.potetm.fusebox :as-alias fb]
     [com.potetm.fusebox.util :as util])
   (:import
     (java.util.concurrent ThreadLocalRandom)))
@@ -35,36 +36,39 @@
                delay ::delay
                :or {succ? always-success} :as spec}
               f]
-  (let [start (System/currentTimeMillis)
-        exec-dur #(- (System/currentTimeMillis)
-                     start)]
-    (loop [n 0]
-      (let [[ret v] (util/try-interruptible
-                      (binding [*retry-count* n
-                                *exec-duration-ms* (exec-dur)]
-                        (let [v (f)]
-                          (if (succ? v)
-                            [::succ v]
-                            [::err v])))
-                      (catch Exception e
-                        [::err e]))]
-        (case ret
-          ::succ v
-          ::err (let [ed (exec-dur)
-                      n' (inc n)]
-                  (if (retry? n'
-                              ed
-                              v)
-                    (do (Thread/sleep (delay n'
-                                             ed
-                                             v))
-                        (recur n'))
-                    (throw (ex-info "fusebox retries exhausted"
-                                    {::error ::error-retries-exhausted
-                                     ::num-retries n
-                                     ::exec-duration-ms ed
-                                     ::spec (util/pretty-spec spec)}
-                                    v)))))))))
+  (if-not retry?
+    (f)
+    (let [start (System/currentTimeMillis)
+          exec-dur #(- (System/currentTimeMillis)
+                       start)]
+      (loop [n 0]
+        (let [[ret v] (util/try-interruptible
+                        (binding [*retry-count* n
+                                  *exec-duration-ms* (exec-dur)]
+                          (let [v (f)]
+                            (if (succ? v)
+                              [::succ v]
+                              [::err v])))
+                        (catch Exception e
+                          [::err e]))]
+          (case ret
+            ::succ v
+            ::err (let [ed (exec-dur)
+                        n' (inc n)]
+                    (if (retry? n'
+                                ed
+                                v)
+                      (do (Thread/sleep ^long
+                                        (delay n'
+                                               ed
+                                               v))
+                          (recur n'))
+                      (throw (ex-info "fusebox retries exhausted"
+                                      {::fb/error ::retries-exhausted
+                                       ::num-retries n
+                                       ::exec-duration-ms ed
+                                       ::fb/spec (util/pretty-spec spec)}
+                                      v))))))))))
 
 
 (defn delay-exp

@@ -1,7 +1,9 @@
 (ns com.potetm.fusebox.circuit-breaker-test
   (:require
+    [clojure.spec.alpha :as s]
     [clojure.test :refer :all]
-    [com.potetm.fusebox.circuit-breaker :as cb])
+    [com.potetm.fusebox.circuit-breaker :as cb]
+    [com.potetm.fusebox.alpha-specs :as specs])
   (:import
     (clojure.lang ExceptionInfo)))
 
@@ -97,15 +99,36 @@
 
   (testing "force opened"
     (let [cb (cb/circuit-breaker {::cb/next-state (constantly nil)
-                                  :state :opened
+                                  ::cb/state ::cb/opened
                                   ::cb/hist-size 10
                                   ::cb/half-open-tries 3
                                   ::cb/slow-call-ms 10})]
       (dotimes [i 20]
         (is (thrown? ExceptionInfo
                      (cb/with-circuit-breaker cb
-                       (inc i))))))))
+                       (inc i)))))))
 
+  (testing "noop"
+    (is (= 123
+           (cb/with-circuit-breaker {:something 'else}
+             123)))
+
+    (is (= 123
+           (cb/with-circuit-breaker nil
+             123)))))
+
+
+(deftest specs
+  (testing "it works"
+    (is (= true (s/valid? ::specs/circuit-breaker
+                          {::cb/next-state (constantly nil)
+                           ::cb/hist-size 10
+                           ::cb/half-open-tries 3
+                           ::cb/slow-call-ms 10})))
+    (is (= false (s/valid? ::specs/circuit-breaker
+                           {::cb/hist-size 10
+                            ::cb/half-open-tries 3
+                            ::cb/slow-call-ms 10})))))
 
 (comment
   @(def cb (cb/circuit-breaker {::cb/next-state (partial cb/next-state:default
@@ -118,6 +141,7 @@
                                 ::cb/half-open-tries 3
                                 ::cb/slow-call-ms 100}))
   (cb/with-circuit-breaker cb
+    (+ 1 1)
     )
 
   (dotimes [i 4]
@@ -131,6 +155,9 @@
   (dotimes [_ 6]
     (swallow-ex (cb/with-circuit-breaker cb
                   (throw (ex-info "" {})))))
+
+
+
 
   cb
   (do (cb/with-circuit-breaker cb

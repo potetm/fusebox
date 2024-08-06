@@ -15,4 +15,4 @@
       (is (= 4 (memo/get m 1)))
       (is (= 1 @invokes-count))
       (is (= 5 (memo/get m 2)))
-      (is (= 2 @invokes-count)) )))
+      (is (= 2 @invokes-count)))))

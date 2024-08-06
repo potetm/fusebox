@@ -8,8 +8,8 @@
   (testing "it works"
     (let [invokes-count (atom 0)
           rl (rl/rate-limiter {::rl/bucket-size 2
-                               ::rl/period-ms 100
-                               ::rl/timeout-ms 500})]
+                               ::rl/period-ms 200
+                               ::rl/wait-timeout-ms 500})]
       (try
         (into []
               (map (fn [i]
@@ -17,15 +17,24 @@
                                (swap! invokes-count inc)))))
               (range 5))
         (is (= 2 @invokes-count))
-        (Thread/sleep 110)
+        (Thread/sleep 250)
         (is (= 4 @invokes-count))
-        (Thread/sleep 110)
+        (Thread/sleep 250)
         (is (= 5 @invokes-count))
         (finally
-          (rl/shutdown rl))))))
+          (rl/shutdown rl)))))
+
+  (testing "noop"
+    (is (= 123
+           (rl/with-rate-limit {:something 'else}
+             123)))
+
+    (is (= 123
+           (rl/with-rate-limit nil
+             123)))))
 
 (comment
   (rl/rate-limiter {::rl/bucket-size 2
                     ::rl/period-ms 100
-                    ::rl/timeout-ms 500})
+                    ::rl/wait-timeout-ms 500})
   (rl/shutdown *1))

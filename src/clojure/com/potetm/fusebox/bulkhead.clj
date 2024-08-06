@@ -1,5 +1,6 @@
 (ns com.potetm.fusebox.bulkhead
   (:require
+    [com.potetm.fusebox :as-alias fb]
     [com.potetm.fusebox.util :as util])
   (:import
     (java.util.concurrent Semaphore
@@ -14,16 +15,21 @@
 (defn with-bulkhead* [{^Semaphore s ::sem
                        to ::timeout-ms :as spec}
                       f]
-  (when s
-    (if (.tryAcquire s
-                     to
-                     TimeUnit/MILLISECONDS)
-      (try (f)
-           (finally
-             (.release s)))
-      (throw (ex-info "fusebox timeout"
-                      {::error :error-timeout
-                       ::spec (util/pretty-spec spec)})))))
+  (cond
+    (not s) (f)
+
+    (.tryAcquire s
+                 to
+                 TimeUnit/MILLISECONDS)
+    (util/try-interruptible
+      (f)
+      (finally
+        (.release s)))
+
+
+    :else (throw (ex-info "fusebox timeout"
+                          {::fb/error ::timeout-waiting-for-bulkhead
+                           ::fb/spec (util/pretty-spec spec)}))))
 
 
 (defmacro with-bulkhead [spec & body]

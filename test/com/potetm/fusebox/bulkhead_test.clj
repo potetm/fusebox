@@ -11,35 +11,58 @@
   (testing "it works"
     (let [bh (bh/bulkhead {::bh/concurrency 2
                            ::bh/timeout-ms 100})
-          futs (into []
-                     (map (fn [i]
-                            (future (bh/with-bulkhead bh
-                                      (Thread/sleep 200)
-                                      ::done!))))
-                     (range 3))]
-      (is (= ::done! @(first futs)))
-      (is (= ::done! @(second futs)))
-      (try
-        @(peek futs)
-        (catch ExecutionException ee
-          (let [cause (.getCause ee)]
-            (is (= ExceptionInfo (type cause)))
-            (is (= "fusebox timeout" (ex-message cause))))))
+          res (sort-by (fn [v]
+                         (if (instance? Exception v)
+                           ::z
+                           v))
+                       (into []
+                             (map (fn [f]
+                                    (try @f
+                                         (catch ExecutionException ee
+                                           (.getCause ee)))))
+                             ;; Need to immediately submit all futures before
+                             ;; resolving any of them.
+                             (into []
+                                   (map (fn [i]
+                                          (future (bh/with-bulkhead bh
+                                                    (Thread/sleep 200)
+                                                    ::done!))))
+                                   (range 3))))]
+      (is (= [::done! ::done!] (take 2 res)))
+      (let [ex (last res)]
+        (is (= ExceptionInfo (type ex)))
+        (is (= "fusebox timeout" (ex-message ex))))
 
       (is (= ::done!
              (bh/with-bulkhead bh
-               ::done!))))))
+               ::done!)))))
+
+  (testing "noop"
+    (is (= 123
+           (bh/with-bulkhead {:something 'else}
+             123)))
+
+    (is (= 123
+           (bh/with-bulkhead nil
+             123)))))
 
 
 (comment
-  (def futs
-    (let [bh (bh/bulkhead {::bh/concurrency 2
-                           ::bh/timeout-ms 100})]
-      (into []
-            (map (fn [i]
-                   (future (bh/with-bulkhead bh
-                             (Thread/sleep 200)))))
-            (range 3))))
+  @(def futs
+     (let [bh (bh/bulkhead {::bh/concurrency 2
+                            ::bh/timeout-ms 100})]
+       (sort-by
+         (into []
+               (map (fn [f]
+                      (try @f
+                           (catch ExecutionException ee
+                             ee))))
+               (into []
+                     (map (fn [i]
+                            (future (bh/with-bulkhead bh
+                                      (Thread/sleep 400)
+                                      ::done!))))
+                     (range 3))))))
 
   (second futs)
   @(peek futs)

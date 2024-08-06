@@ -1,15 +1,16 @@
 {:paths ["src/clojure"]
 
- :deps {org.clojure/clojure {:mvn/version "1.10.1"}
-        org.clojure/tools.logging {:mvn/version "0.6.0"}}
+ :deps {org.clojure/clojure {:mvn/version "1.11.4"}}
 
  :aliases {:dev {:extra-paths ["dev" "test"]
                  :extra-deps {nrepl/nrepl {:mvn/version "0.6.0"}
+                              org.clojure/test.check {:mvn/version "1.1.1"}}}
 
-                              ;; Java's crazy logging
-                              org.slf4j/slf4j-api {:mvn/version "1.7.30"}
-                              org.slf4j/log4j-over-slf4j {:mvn/version "1.7.30"}
-                              ch.qos.logback/logback-classic {:mvn/version "1.2.3"}}}}
+           :test {:extra-paths ["test"]
+                  :extra-deps {io.github.cognitect-labs/test-runner
+                               {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+                  :main-opts ["-m" "cognitect.test-runner"]
+                  :exec-fn cognitect.test-runner.api/test}}
 
  :mvn/repos {"central" {:url "https://repo1.maven.org/maven2/"}
              "clojars" {:url "https://clojars.org/repo"}}}
