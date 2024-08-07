@@ -8,15 +8,21 @@
   (atom {}))
 
 
-(defn register! [k spec]
+(defn register!
+  "Register a spec under key k."
+  [k spec]
   (swap! registry assoc k spec)
   nil)
 
 
-(defn un-register! [k spec]
-  (swap! registry dissoc k spec)
+(defn un-register!
+  "Removes key k from the registry."
+  [k]
+  (swap! registry dissoc k)
   nil)
 
 
-(defn get [k]
+(defn get
+  "Retrieve the spec associated with k from the registry."
+  [k]
   (cc/get @registry k))

@@ -1,5 +1,7 @@
 (ns com.potetm.fusebox.memoize
   (:refer-clojure :exclude [memoize get])
+  (:require
+    [com.potetm.fusebox.util :as util])
   (:import
     (java.util.concurrent ConcurrentHashMap)
     (java.util.function Function)))
@@ -8,13 +10,25 @@
 (set! *warn-on-reflection* true)
 
 
-(defn memoize [spec]
+(defn init
+  "Initialize a memoized function.
+
+  spec is a map containing:
+    ::fn - The function to memoize
+
+  ::fn is guaranteed to be called exactly once."
+  [spec]
+  (util/assert-keys "Memoize"
+                    {:req-keys [::fn]}
+                    spec)
   (merge {::chm (ConcurrentHashMap.)}
          spec))
 
 
-(defn get [{^ConcurrentHashMap chm ::chm
-            f ::fn} & args]
+(defn get
+  "Retrieve a value, invoking ::fn if necessary."
+  [{^ConcurrentHashMap chm ::chm
+    f ::fn} & args]
   (.computeIfAbsent chm
                     args
                     (reify Function
@@ -22,9 +36,6 @@
                         (apply f args)))))
 
 
-(comment
-  @(def m (memoize (fn [i]
-                     (println "COMPUTING!")
-                     (+ i 3))))
-
-  (get m 7))
+(defn shutdown [{^ConcurrentHashMap chm ::chm}]
+  (.clear chm)
+  nil)

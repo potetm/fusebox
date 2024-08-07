@@ -7,13 +7,23 @@
                           TimeUnit)))
 
 
-(defn bulkhead [{c ::concurrency :as spec}]
+(defn init
+  "Initialize a bulkhead (i.e. concurrency limiter).
+
+  spec is a map containing:
+    ::concurrency     - the integer number of concurrent callers to allow
+    ::wait-timeout-ms - max millis a thread waits"
+  [{c ::concurrency :as spec}]
+  (util/assert-keys "Bulkhead"
+                    {:req-keys [::concurrency
+                                ::wait-timeout-ms]}
+                    spec)
   (merge {::sem (Semaphore. c)}
          spec))
 
 
 (defn with-bulkhead* [{^Semaphore s ::sem
-                       to ::timeout-ms :as spec}
+                       to ::wait-timeout-ms :as spec}
                       f]
   (cond
     (not s) (f)
@@ -26,17 +36,19 @@
       (finally
         (.release s)))
 
-
     :else (throw (ex-info "fusebox timeout"
                           {::fb/error ::timeout-waiting-for-bulkhead
                            ::fb/spec (util/pretty-spec spec)}))))
 
 
-(defmacro with-bulkhead [spec & body]
+(defmacro with-bulkhead
+  "Evaluates body, guarded by the provided bulkhead."
+  [spec & body]
   `(with-bulkhead* ~spec
                    (^{:once true} fn* [] ~@body)))
 
 
 (defn shutdown [{^Semaphore s ::sem}]
   ;; Don't allow any more processes to acquire any more permits
-  (.drainPermits s))
+  (.drainPermits s)
+  nil)

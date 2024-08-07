@@ -9,8 +9,8 @@
 
 (deftest bulkhead-test
   (testing "it works"
-    (let [bh (bh/bulkhead {::bh/concurrency 2
-                           ::bh/timeout-ms 100})
+    (let [bh (bh/init {::bh/concurrency 2
+                       ::bh/wait-timeout-ms 100})
           res (sort-by (fn [v]
                          (if (instance? Exception v)
                            ::z
@@ -49,8 +49,8 @@
 
 (comment
   @(def futs
-     (let [bh (bh/bulkhead {::bh/concurrency 2
-                            ::bh/timeout-ms 100})]
+     (let [bh (bh/init {::bh/concurrency 2
+                        ::bh/wait-timeout-ms 100})]
        (sort-by
          (into []
                (map (fn [f]

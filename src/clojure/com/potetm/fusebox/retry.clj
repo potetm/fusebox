@@ -9,6 +9,29 @@
 (set! *warn-on-reflection* true)
 
 
+(defn init
+  "Initialize a retry.
+
+  spec is map containing:
+    ::retry?   - A predicate called after an exception to determine
+                 whether body should be retried. Takes three args:
+                 eval-count, exec-duration-ms, and the exception.
+    ::delay-ms - A function which calculates the delay in millis to
+                 wait prior to the next evaluation. Takes three args:
+                 eval-count, exec-duration-ms, and the exception.
+    ::success? - A function which takes a return value and determines whether
+                 it was successful. If false, body is retried.
+                 Defaults to (constantly true)."
+  [{_r? ::retry?
+    _d ::delay-ms :as spec}]
+  (util/assert-keys "Retry"
+                    {:req-keys [::retry?
+                                ::delay-ms]
+                     :opt-keys [::success?]}
+                    spec)
+  spec)
+
+
 (def ^{:dynamic true
        :doc
        "The number of times a call has been previously attempted.
@@ -33,7 +56,7 @@
 
 (defn retry* [{succ? ::success?
                retry? ::retry?
-               delay ::delay
+               delay ::delay-ms
                :or {succ? always-success} :as spec}
               f]
   (if-not retry?
@@ -105,15 +128,10 @@
 
 
 (defmacro with-retry
-  "Evaluate body, retrying if an exception is thrown.
-
-  spec is map containing:
-    ::retry? - A predicate called after an exception to determine
-               whether body should be re-evaluated. Takes three args:
-               eval-count, exec-duration-ms, and the exception.
-    ::retry-delay - A function which calculates the delay in millis to
-                    wait prior to the next evaluation. Takes two args:
-                    eval-count and exec-duration-ms."
+  "Evaluates body, retrying according to the provided retry spec."
   [spec & body]
   `(retry* ~spec
            (fn [] ~@body)))
+
+
+(defn shutdown [spec])

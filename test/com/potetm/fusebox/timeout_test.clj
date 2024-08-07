@@ -17,7 +17,7 @@
   (testing "base case"
     (let [[t ret] (timing
                     (try
-                      (to/with-timeout {::to/timeout-ms 5}
+                      (to/with-timeout (to/init {::to/timeout-ms 5})
                         (Thread/sleep 100))
                       (catch ExceptionInfo ei
                         ::timeout)))]
@@ -28,7 +28,7 @@
   (testing "base case - no sleeping"
     (let [[t ret] (timing
                     (try
-                      (to/with-timeout {::to/timeout-ms 5}
+                      (to/with-timeout (to/init {::to/timeout-ms 5})
                         ;; benchmarking says this is about 30ms
                         (doseq [_ (range 10000000)]))
                       (catch ExceptionInfo ei
@@ -41,7 +41,7 @@
     (let [intr? (volatile! false)
           [t ret] (timing
                     (try
-                      (to/with-timeout {::to/timeout-ms 5}
+                      (to/with-timeout (to/init {::to/timeout-ms 5})
                         (try
                           (Thread/sleep 100)
                           (catch InterruptedException ie
@@ -69,6 +69,14 @@
       (is (< t 15))
       (is (= false @intr?))))
 
+
+  (testing "try-interruptible"
+    (is (thrown? InterruptedException
+                 (to/try-interruptible
+                   (throw (InterruptedException.))
+                   (catch InterruptedException ie
+                     ::CAUGHT!)))))
+
   (testing "noop"
     (is (= 123
            (to/with-timeout {:something 'else}
@@ -76,4 +84,9 @@
 
     (is (= 123
            (to/with-timeout nil
-             123)))))
+             123))))
+
+  (testing "invalid args"
+    (is (thrown-with-msg? ExceptionInfo
+                          #"(?i)invalid"
+                          (to/init {:foo :bar})))))

@@ -3,7 +3,6 @@
     [com.potetm.fusebox :as-alias fb]
     [com.potetm.fusebox.util :as util])
   (:import
-    (java.time Duration)
     (java.util.concurrent ExecutorService
                           Executors
                           ThreadFactory
@@ -13,6 +12,31 @@
 
 
 (set! *warn-on-reflection* true)
+
+
+(defmacro try-interruptible
+  "Same as clojure.core/try, but guarantees an InterruptedException will be
+  rethrown and never swallowed.
+
+  This should be preferred to clojure.core/try for calls to with-timeout."
+  [& body]
+  `(util/try-interruptible ~@body))
+
+
+(defn init
+  "Initialize a Timeout.
+
+  spec is a map containing:
+    ::timeout-ms - millis to wait before timing out
+    ::interrupt? - bool indicated whether a timed-out thread should be interrupted
+                   on timeout"
+  [{_to ::timeout-ms :as spec}]
+  (util/assert-keys "Timeout"
+                    {:req-keys [::timeout-ms]
+                     :opt-keys [::interrupt?]}
+                    spec)
+  (merge {::interrupt? true}
+         spec))
 
 
 (defonce ^:private
@@ -28,9 +52,7 @@
 
 
 (defn timeout* [{to ::timeout-ms
-                 intr? ::interrupt?
-                 :or {intr? true}
-                 :as spec}
+                 intr? ::interrupt? :as spec}
                 f]
   (if-not to
     (f)
@@ -52,10 +74,12 @@
 
 
 (defmacro with-timeout
-  "Evaluates body, aborting if it lasts longer than specified.
+  "Evaluates body, throwing ExceptionInfo if lasting longer than specified.
 
-  spec is map containing:
-    ::timeout-ms - The timeout in milliseconds"
+  spec is the return value of init."
   [spec & body]
   `(timeout* ~spec
              (^{:once true} fn* [] ~@body)))
+
+
+(defn shutdown [spec])

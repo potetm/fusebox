@@ -2,6 +2,7 @@
   (:require
     [com.potetm.fusebox.bulkhead :as-alias bh]
     [com.potetm.fusebox.circuit-breaker :as-alias cb]
+    [com.potetm.fusebox.fallback :as-alias fallback]
     [com.potetm.fusebox.memoize :as-alias memo]
     [com.potetm.fusebox.rate-limit :as-alias rl]
     [com.potetm.fusebox.retry :as-alias retry]
@@ -37,6 +38,17 @@
                                                    (.factory))))))
 
 
+(defn assert-keys [n {req :req-keys :as deets} spec]
+  (let [ks' (into #{}
+                  (remove (fn [k]
+                            (get spec k)))
+                  req)]
+    (when (seq ks')
+      (throw (ex-info (str "Invalid " n)
+                      (merge deets
+                             {:missing-keys ks'}))))))
+
+
 (defn convey-bindings [f]
   (let [binds (Var/getThreadBindingFrame)]
     (fn []
@@ -67,8 +79,10 @@
   ([spec]
    (dissoc spec
            ::cb/circuit-breaker
+           ::cb/success?
            ::memo/fn
+           ::fallback/fallback
            ::rl/bg-exec
            ::retry/retry?
-           ::retry/delay
+           ::retry/delay-ms
            ::retry/success?)))

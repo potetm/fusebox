@@ -1,9 +1,7 @@
 (ns com.potetm.fusebox.circuit-breaker-test
   (:require
-    [clojure.spec.alpha :as s]
     [clojure.test :refer :all]
-    [com.potetm.fusebox.circuit-breaker :as cb]
-    [com.potetm.fusebox.alpha-specs :as specs])
+    [com.potetm.fusebox.circuit-breaker :as cb])
   (:import
     (clojure.lang ExceptionInfo)))
 
@@ -16,14 +14,14 @@
 
 (deftest circuit-breaker-test
   (testing "it works"
-    (let [cb (cb/circuit-breaker {::cb/next-state (partial cb/next-state:default
-                                                           {:fail-pct 0.5
-                                                            :slow-pct 0.5
-                                                            :wait-for-count 3
-                                                            :open->half-open-after-ms 100})
-                                  ::cb/hist-size 10
-                                  ::cb/half-open-tries 3
-                                  ::cb/slow-call-ms 100})]
+    (let [cb (cb/init {::cb/next-state (partial cb/next-state:default
+                                                {:fail-pct 0.5
+                                                 :slow-pct 0.5
+                                                 :wait-for-count 3
+                                                 :open->half-open-after-ms 100})
+                       ::cb/hist-size 10
+                       ::cb/half-open-tries 3
+                       ::cb/slow-call-ms 100})]
       (dotimes [_ 3]
         (cb/with-circuit-breaker cb
           (+ 1 1)))
@@ -47,15 +45,15 @@
                               (+ 1 1))))))
 
   (testing "::success fn"
-    (let [cb (cb/circuit-breaker {::cb/next-state (partial cb/next-state:default
-                                                           {:fail-pct 0.4
-                                                            :slow-pct 0.4
-                                                            :wait-for-count 3
-                                                            :open->half-open-after-ms 100})
-                                  ::cb/success? even?
-                                  ::cb/hist-size 10
-                                  ::cb/half-open-tries 3
-                                  ::cb/slow-call-ms 100})]
+    (let [cb (cb/init {::cb/next-state (partial cb/next-state:default
+                                                {:fail-pct 0.4
+                                                 :slow-pct 0.4
+                                                 :wait-for-count 3
+                                                 :open->half-open-after-ms 100})
+                       ::cb/success? even?
+                       ::cb/hist-size 10
+                       ::cb/half-open-tries 3
+                       ::cb/slow-call-ms 100})]
       (dotimes [i 3]
         (cb/with-circuit-breaker cb
           (inc i)))
@@ -66,14 +64,14 @@
                               (+ 1 1))))))
 
   (testing "slow calls"
-    (let [cb (cb/circuit-breaker {::cb/next-state (partial cb/next-state:default
-                                                           {:fail-pct 0.4
-                                                            :slow-pct 0.4
-                                                            :wait-for-count 3
-                                                            :open->half-open-after-ms 100})
-                                  ::cb/hist-size 10
-                                  ::cb/half-open-tries 3
-                                  ::cb/slow-call-ms 10})]
+    (let [cb (cb/init {::cb/next-state (partial cb/next-state:default
+                                                {:fail-pct 0.4
+                                                 :slow-pct 0.4
+                                                 :wait-for-count 3
+                                                 :open->half-open-after-ms 100})
+                       ::cb/hist-size 10
+                       ::cb/half-open-tries 3
+                       ::cb/slow-call-ms 10})]
       (dotimes [i 3]
         (cb/with-circuit-breaker cb
           (when (even? i)
@@ -85,10 +83,10 @@
                               (+ 1 1))))))
 
   (testing "disabled"
-    (let [cb (cb/circuit-breaker {::cb/next-state (constantly nil)
-                                  ::cb/hist-size 10
-                                  ::cb/half-open-tries 3
-                                  ::cb/slow-call-ms 10})]
+    (let [cb (cb/init {::cb/next-state (constantly nil)
+                       ::cb/hist-size 10
+                       ::cb/half-open-tries 3
+                       ::cb/slow-call-ms 10})]
       (dotimes [i 20]
         (swallow-ex
           (cb/with-circuit-breaker cb
@@ -98,11 +96,11 @@
                  (+ 1 1))))))
 
   (testing "force opened"
-    (let [cb (cb/circuit-breaker {::cb/next-state (constantly nil)
-                                  ::cb/state ::cb/opened
-                                  ::cb/hist-size 10
-                                  ::cb/half-open-tries 3
-                                  ::cb/slow-call-ms 10})]
+    (let [cb (cb/init {::cb/next-state (constantly nil)
+                       ::cb/state ::cb/opened
+                       ::cb/hist-size 10
+                       ::cb/half-open-tries 3
+                       ::cb/slow-call-ms 10})]
       (dotimes [i 20]
         (is (thrown? ExceptionInfo
                      (cb/with-circuit-breaker cb
@@ -115,51 +113,9 @@
 
     (is (= 123
            (cb/with-circuit-breaker nil
-             123)))))
+             123))))
 
-
-(deftest specs
-  (testing "it works"
-    (is (= true (s/valid? ::specs/circuit-breaker
-                          {::cb/next-state (constantly nil)
-                           ::cb/hist-size 10
-                           ::cb/half-open-tries 3
-                           ::cb/slow-call-ms 10})))
-    (is (= false (s/valid? ::specs/circuit-breaker
-                           {::cb/hist-size 10
-                            ::cb/half-open-tries 3
-                            ::cb/slow-call-ms 10})))))
-
-(comment
-  @(def cb (cb/circuit-breaker {::cb/next-state (partial cb/next-state:default
-                                                         {:fail-pct 0.5
-                                                          :slow-pct 0.5
-                                                          :wait-for-count 3
-                                                          :open->half-open-after-ms 100})
-                                ::cb/success? odd?
-                                ::cb/hist-size 10
-                                ::cb/half-open-tries 3
-                                ::cb/slow-call-ms 100}))
-  (cb/with-circuit-breaker cb
-    (+ 1 1)
-    )
-
-  (dotimes [i 4]
-    (cb/with-circuit-breaker cb
-      (inc i)))
-  @(::cb/circuit-breaker cb)
-
-  (dotimes [_ 3]
-    (cb/with-circuit-breaker cb
-      (+ 1 1)))
-  (dotimes [_ 6]
-    (swallow-ex (cb/with-circuit-breaker cb
-                  (throw (ex-info "" {})))))
-
-
-
-
-  cb
-  (do (cb/with-circuit-breaker cb
-        (+ 1 1))
-      ))
+  (testing "invalid args"
+    (is (thrown-with-msg? ExceptionInfo
+                          #"(?i)invalid"
+                          (cb/init {::cb/hist-size 100})))))

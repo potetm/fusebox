@@ -7,21 +7,29 @@
 
 (deftest fallback-test
   (testing "it works"
-    (is (= 123
-           (fallback/with-fallback {::fallback/fallback (fn [ex]
-                                                          123)}
-             (throw (ex-info "" {}))))))
+    (let [fallback (fallback/init {::fallback/fallback (fn [ex]
+                                                         123)})]
+      (is (= 123
+             (fallback/with-fallback fallback
+               (throw (ex-info "" {})))))))
 
 
   (testing "you can rethrow the ex"
-    (is (thrown? ExceptionInfo
-                 (fallback/with-fallback {::fallback/fallback (fn [ex]
-                                                                (throw ex))}
-                   (throw (ex-info "" {}))))))
+    (let [fallback (fallback/init {::fallback/fallback (fn [ex]
+                                                         (throw ex))})]
+      (is (thrown? ExceptionInfo
+                   (fallback/with-fallback fallback
+                     (throw (ex-info "" {})))))))
 
 
   (testing "it does nothing if an exception isn't thrown"
-    (is (= 456
-           (fallback/with-fallback {::fallback/fallback (fn [ex]
-                                                          (throw ex))}
-             456)))))
+    (let [fallback (fallback/init {::fallback/fallback (fn [ex]
+                                                         (throw ex))})]
+      (is (= 456
+             (fallback/with-fallback fallback
+               456)))))
+
+  (testing "invalid args"
+    (is (thrown-with-msg? ExceptionInfo
+                          #"(?i)invalid"
+                          (fallback/init {:some 1})))))

@@ -32,8 +32,8 @@
 
 (comment
 
-  (def cb (cb/circuit-breaker {::cb/next-state (partial cb/next-state:default
-                                                        {:fail-pct 0.5
+  (def cb (cb/init {::cb/next-state (partial cb/next-state:default
+                                             {:fail-pct 0.5
                                                          :slow-pct 0.5
                                                          :wait-for-count 3
                                                          :open->half-open-after-ms 100})

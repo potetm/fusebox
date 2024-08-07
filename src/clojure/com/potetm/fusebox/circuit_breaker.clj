@@ -69,9 +69,33 @@
     ::closed))
 
 
-(defn circuit-breaker [{rs ::hist-size
-                        succ? ::success? :as spec}]
-  {::circuit-breaker (atom (merge {::record (vec (repeat rs
+(defn init
+  "Initialize a circuit breaker.
+
+  spec is a map containing:
+    ::next-state - fn taking the current circuit breaker and returning the next
+                   state or nil if no transition is necessary. See next-state:default
+                   for a default implementation. Return value must be one of:
+                   ::closed, ::half-open, ::open
+    ::hist-size       - The number of calls to track
+    ::half-open-tries - The number of calls to allow in a ::half-open state
+    ::slow-call-ms    - Milli threshold to label a call ::slow
+    ::success?        - A function which takes a return value and determines
+                        whether it was successful. If false, a ::failure is
+                        recorded."
+  [{_ns ::next-state
+    hs ::hist-size
+    _hot ::half-open-tries
+    _scm ::slow-call-ms
+    succ? ::success? :as spec}]
+  (util/assert-keys "Circuit Breaker"
+                    {:req-keys [::next-state
+                                ::hist-size
+                                ::half-open-tries
+                                ::slow-call-ms]
+                     :opt-keys []}
+                    spec)
+  {::circuit-breaker (atom (merge {::record (vec (repeat hs
                                                          {::fails 0
                                                           ::slows 0}))
                                    ::record-idx 0
@@ -200,6 +224,11 @@
                        ::fb/spec (util/pretty-spec spec)})))))
 
 
-(defmacro with-circuit-breaker [spec & body]
+(defmacro with-circuit-breaker
+  "Evaluates body, guarded by the provided circuit breaker."
+  [spec & body]
   `(with-circuit-breaker* ~spec
                           (^{:once true} fn* [] ~@body)))
+
+
+(defn shutdown [spec])
