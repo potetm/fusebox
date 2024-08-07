@@ -34,15 +34,36 @@
                             (cb/with-circuit-breaker cb
                               (+ 1 1))))
       (Thread/sleep 100)
-      (dotimes [_ 2]
-        (swallow-ex (cb/with-circuit-breaker cb
-                      (throw (ex-info "" {})))))
-      (cb/with-circuit-breaker cb
-        (+ 1 1))
+      (swallow-ex (cb/with-circuit-breaker cb
+                    (throw (ex-info "" {}))))
+      (is (= ::cb/half-opened
+             (::cb/state (cb/current cb))))
+      (swallow-ex (cb/with-circuit-breaker cb
+                    (throw (ex-info "" {}))))
+      (is (= ::cb/half-opened
+             (::cb/state (cb/current cb))))
+      (is (= 2
+             (cb/with-circuit-breaker cb
+               (+ 1 1))))
+      ;; open now because 2/3 half-open calls failed
+      (is (= ::cb/opened
+             (::cb/state (cb/current cb))))
       (is (thrown-with-msg? ExceptionInfo
                             #"fusebox circuit breaker open"
                             (cb/with-circuit-breaker cb
-                              (+ 1 1))))))
+                              (+ 1 1))))
+      (Thread/sleep 100)
+      (is (= 2
+             (cb/with-circuit-breaker cb
+               (+ 1 1))))
+      (is (= ::cb/half-opened
+             (::cb/state (cb/current cb))))
+      (dotimes [_ 2]
+        (is (= 2
+               (cb/with-circuit-breaker cb
+                 (+ 1 1)))))
+      (is (= ::cb/closed
+             (::cb/state (cb/current cb))))))
 
   (testing "::success fn"
     (let [cb (cb/init {::cb/next-state (partial cb/next-state:default

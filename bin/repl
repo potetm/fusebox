@@ -5,6 +5,6 @@ set -Eeuo pipefail
 cd "$(dirname "$0")"/..
 
 clj \
-  -J-Dfusebox.usePlatformThreads=true \
+  -J-Dfusebox.usePlatformThreads=false \
   -M:dev \
   -m nrepl.cmdline

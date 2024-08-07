@@ -33,9 +33,10 @@
   virtual-exec
   (when (and (not (platform-threads?))
              (class-for-name "java.lang.VirtualThread"))
-    (eval '(Executors/newThreadPerTaskExecutor (-> (Thread/ofVirtual)
-                                                   (.name "fusebox-thread-" 1)
-                                                   (.factory))))))
+    (eval '(java.util.concurrent.Executors/newThreadPerTaskExecutor
+             (-> (Thread/ofVirtual)
+                 (.name "fusebox-thread-" 1)
+                 (.factory))))))
 
 
 (defn assert-keys [n {req :req-keys :as deets} spec]

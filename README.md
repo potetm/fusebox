@@ -1,5 +1,5 @@
 # Fusebox
-An extremely lightweight resilience library for Clojure.
+An extremely lightweight resilience library for Clojure
 
 ## Rationale
 Resilience libraries—both in Java and in Clojure—are heavyweight, have dozens of
@@ -125,8 +125,8 @@ Most production applications will want to use a cache instead of memoize. It's i
 in this library for three reasons:
 
 * Memoize makes sense for a small subset of use cases.
-* `clojure.core/memoize` will re-run fn under contention, and you probably want to avoid it.
-* To show a setup for a [good cache](https://github.com/ben-manes/caffeine).
+* `clojure.core/memoize` will re-run its fn under contention, and you probably want to avoid it.
+* To show a good setup for [caching](https://github.com/ben-manes/caffeine).
 
 ### Rate Limit
 ```clj
@@ -454,6 +454,13 @@ blocks, you'll want to disable them with the startup flag `-Dfusebox.usePlatform
 ```
 clj -J-Dfusebox.usePlatformThreads=true ...
 ```
+
+## Acknowledgements
+This library pulls heavily from [Resilience4J](https://resilience4j.readme.io/). I owe
+them a huge debt of gratitude for all of their work.
+
+Also, [Failsafe](https://failsafe.dev/) was an inspiration for early versions of
+Fusebox and for the [Fallback](#fallback) utility.
 
 ## License
 Copyright © 2016 Timothy Pote

@@ -41,7 +41,8 @@
                           (rl/init {::rl/bucket-size 1})))))
 
 (comment
-  (rl/init {::rl/bucket-size 2
-            ::rl/period-ms 100
-            ::rl/wait-timeout-ms 500})
+  @(def rl (rl/init {::rl/bucket-size 2
+                     ::rl/period-ms 100
+                     ::rl/wait-timeout-ms 500}))
+  rl
   (rl/shutdown *1))
