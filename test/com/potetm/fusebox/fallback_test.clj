@@ -2,7 +2,8 @@
   (:require
     [clojure.test :refer :all]
     [com.potetm.fusebox.fallback :as fallback])
-  (:import (clojure.lang ExceptionInfo)))
+  (:import
+    (clojure.lang ExceptionInfo)))
 
 
 (deftest fallback-test

@@ -12,7 +12,7 @@
 
   spec is a map containing:
     ::concurrency     - the integer number of concurrent callers to allow
-    ::wait-timeout-ms - max millis a thread waits"
+    ::wait-timeout-ms - max millis a thread will wait to enter bulkhead"
   [{c ::concurrency :as spec}]
   (util/assert-keys "Bulkhead"
                     {:req-keys [::concurrency

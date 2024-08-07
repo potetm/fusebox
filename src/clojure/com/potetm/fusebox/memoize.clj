@@ -16,7 +16,7 @@
   spec is a map containing:
     ::fn - The function to memoize
 
-  ::fn is guaranteed to be called exactly once."
+  ::fn is guaranteed to be called once."
   [spec]
   (util/assert-keys "Memoize"
                     {:req-keys [::fn]}
@@ -36,6 +36,4 @@
                         (apply f args)))))
 
 
-(defn shutdown [{^ConcurrentHashMap chm ::chm}]
-  (.clear chm)
-  nil)
+(defn shutdown [_spec])

@@ -19,7 +19,7 @@
           ret (try
                 (retry/with-retry (retry/init {::retry/retry? (fn [n ms ex]
                                                                 (< n 10))
-                                               ::retry/delay-ms (constantly 1)})
+                                               ::retry/delay (constantly 1)})
                   (swap! invokes-count inc)
                   (throw (ex-info "" {})))
                 (catch ExceptionInfo ei
@@ -33,7 +33,7 @@
           ret (try
                 (retry/with-retry (retry/init {::retry/retry? (fn [n ms ex]
                                                                 (< n 10))
-                                               ::retry/delay-ms (constantly 1)})
+                                               ::retry/delay (constantly 1)})
 
                   (if (= 5 (swap! invokes-count inc))
                     ::success
@@ -47,7 +47,7 @@
     (let [invokes-count (atom 0)
           [ms ret] (timing
                      (retry/with-retry (retry/init {::retry/retry? (constantly true)
-                                                    ::retry/delay-ms (constantly 100)})
+                                                    ::retry/delay (constantly 100)})
                        (when (= 1 (swap! invokes-count inc))
                          (throw (ex-info "" {})))
                        ::success))]
@@ -58,7 +58,7 @@
   (testing "::retry/success?"
     (let [invokes-count (atom 0)
           ret (retry/with-retry (retry/init {::retry/retry? (constantly true)
-                                             ::retry/delay-ms (constantly 1)
+                                             ::retry/delay (constantly 1)
                                              ::retry/success? (fn [i]
                                                                 (< 9 i))})
                 (swap! invokes-count inc))]
@@ -71,7 +71,9 @@
         (try
           (retry/with-retry (retry/init {::retry/retry? (fn [n ms ex]
                                                           (< n 10))
-                                         ::retry/delay-ms (constantly 1)})
+                                         ::retry/delay (constantly 1)
+                                         ::retry/success? (fn [i]
+                                                            (< 5 i))})
             (is (= (swap! invokes-count inc)
                    retry/*retry-count*)))
           (catch ExceptionInfo ei
@@ -84,7 +86,7 @@
         (try
           (retry/with-retry (retry/init {::retry/retry? (fn [n ms ex]
                                                           (< n 100))
-                                         ::retry/delay-ms (constantly 1)})
+                                         ::retry/delay (constantly 1)})
             (let [edm retry/*exec-duration-ms*]
               (when-not (zero? retry/*retry-count*)
                 ;; This is guaranteed to fail due to clock skew

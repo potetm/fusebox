@@ -14,7 +14,7 @@
   (testing "it works"
     (let [spec (merge (retry/init {::retry/retry? (fn [c dur ex]
                                                     (< c 10))
-                                   ::retry/delay-ms (constantly 10)})
+                                   ::retry/delay (constantly 10)})
                       (to/init {::to/timeout-ms 500})
                       (fallback/init {::fallback/fallback (fn [ex]
                                                             :yes!)})

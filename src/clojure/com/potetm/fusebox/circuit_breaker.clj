@@ -7,33 +7,45 @@
                Instant)))
 
 
-(defn time-expired? [{^Instant lta ::last-transition-at} duration-ms]
+(defn time-expired?
+  "Has the provided duration-ms (in millis) expired since the last state transition
+  for this circuit breaker?"
+  [{^Instant lta ::last-transition-at} duration-ms]
   (.isAfter (Instant/now)
             (.plusMillis lta duration-ms)))
 
 
-(defn slow-pct [{sc ::slow-count
-                 tc ::total-count}]
+(defn slow-pct
+  "The percent of calls currently tracked by the circuit breaker which are slow."
+  [{sc ::slow-count
+    tc ::total-count}]
   (double (/ sc tc)))
 
 
-(defn fail-pct [{fc ::failed-count
-                 tc ::total-count}]
+(defn fail-pct
+  "The percent of calls currently tracked by the circuit breaker which are failed."
+  [{fc ::failed-count
+    tc ::total-count}]
   (double (/ fc tc)))
 
 
-(defn slow|fail-pct [{fc ::failed-count
-                      sc ::slow-count
-                      tc ::total-count}]
+(defn slow|fail-pct
+  "The percent of calls currently tracked by the circuit breaker which are either
+  slow or failed."
+  [{fc ::failed-count
+    sc ::slow-count
+    tc ::total-count}]
   (double (/ (+ fc sc)
              tc)))
 
 
-(defn should-open? [{s ::state
-                     tc ::total-count :as cb}
-                    wait-for
-                    fail-threshold
-                    slow-threshold]
+(defn should-open?
+  "Default implementation for determining whether to transition to a ::opened state."
+  [{s ::state
+    tc ::total-count :as cb}
+   wait-for
+   fail-threshold
+   slow-threshold]
   (and (<= wait-for tc)
        (or (= s ::half-opened)
            (= s ::closed))
@@ -41,22 +53,31 @@
            (< slow-threshold (slow-pct cb)))))
 
 
-(defn should-close? [{s ::state
-                      tc ::total-count :as cb}
-                     wait-for
-                     fail-threshold
-                     slow-threshold]
+(defn should-close?
+  "Default implementation for determining whether to transition to a ::closed state."
+  [{s ::state
+    tc ::total-count :as cb}
+   wait-for
+   fail-threshold
+   slow-threshold]
   (and (<= wait-for tc)
        (= s ::half-opened)
        (< (fail-pct cb) fail-threshold)
        (< (slow-pct cb) slow-threshold)))
 
 
-(defn next-state:default [{fp :fail-pct
-                           sp :slow-pct
-                           wfc :wait-for-count
-                           hoa :open->half-open-after-ms}
-                          {s ::state :as cb}]
+(defn next-state:default
+  "A default ::next-state implementation.
+
+  * :fail-pct - The decimal threshold to use to open the breaker due to failed calls (0, 1]
+  * :slow-pct - The decimal threshold to use to open the breaker due to slow calls (0, 1]
+  * :wait-for-count - The number of calls to wait for after transitioning before transitioning again
+  * :open->half-open-after-ms - Millis to wait before transitioning from ::opened to ::half-open"
+  [{fp :fail-pct
+    sp :slow-pct
+    wfc :wait-for-count
+    hoa :open->half-open-after-ms}
+   {s ::state :as cb}]
   (cond
     (and (= s ::opened)
          (time-expired? cb hoa))
@@ -79,7 +100,7 @@
                    ::closed, ::half-open, ::open
     ::hist-size       - The number of calls to track
     ::half-open-tries - The number of calls to allow in a ::half-open state
-    ::slow-call-ms    - Milli threshold to label a call ::slow
+    ::slow-call-ms    - Milli threshold to label a call slow
     ::success?        - A function which takes a return value and determines
                         whether it was successful. If false, a ::failure is
                         recorded."
@@ -230,5 +251,10 @@
   `(with-circuit-breaker* ~spec
                           (^{:once true} fn* [] ~@body)))
 
+
+(defn current
+  "The current circuit breaker state. Useful for diagnostics or testing."
+  [{cb ::circuit-breaker}]
+  @cb)
 
 (defn shutdown [spec])

@@ -84,5 +84,5 @@
            ::fallback/fallback
            ::rl/bg-exec
            ::retry/retry?
-           ::retry/delay-ms
+           ::retry/delay
            ::retry/success?)))

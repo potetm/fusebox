@@ -15,18 +15,18 @@
   spec is map containing:
     ::retry?   - A predicate called after an exception to determine
                  whether body should be retried. Takes three args:
-                 eval-count, exec-duration-ms, and the exception.
-    ::delay-ms - A function which calculates the delay in millis to
+                 eval-count, exec-duration-ms, and the exception/failing value.
+    ::delay    - A function which calculates the delay in millis to
                  wait prior to the next evaluation. Takes three args:
-                 eval-count, exec-duration-ms, and the exception.
-    ::success? - A function which takes a return value and determines whether
-                 it was successful. If false, body is retried.
+                 eval-count, exec-duration-ms, and the exception/failing value.
+    ::success? - (Optional) A function which takes a return value and determines
+                 whether it was successful. If false, body is retried.
                  Defaults to (constantly true)."
   [{_r? ::retry?
-    _d ::delay-ms :as spec}]
+    _d ::delay :as spec}]
   (util/assert-keys "Retry"
                     {:req-keys [::retry?
-                                ::delay-ms]
+                                ::delay]
                      :opt-keys [::success?]}
                     spec)
   spec)
@@ -56,7 +56,7 @@
 
 (defn retry* [{succ? ::success?
                retry? ::retry?
-               delay ::delay-ms
+               delay ::delay
                :or {succ? always-success} :as spec}
               f]
   (if-not retry?
