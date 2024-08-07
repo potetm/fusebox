@@ -1,6 +1,11 @@
 # Fusebox
 An extremely lightweight resilience library for Clojure
 
+## Current Release
+```clj
+com.potetm/fusebox {:mvn/version "0.1.0-SHAPSHOT"}
+```
+
 ## Rationale
 Resilience libraries—both in Java and in Clojure—are heavyweight, have dozens of
 options, are callback-driven, and have extremely complicated execution models.
