@@ -1,0 +1,20 @@
+<configuration>
+  <appender name="ROLLING" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>logs/dev.log</file>
+    <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+        <fileNamePattern>logs/dev.log.%d{yyyy-MM-dd}.%i</fileNamePattern>
+
+       <maxFileSize>100MB</maxFileSize>
+       <maxHistory>10</maxHistory>
+       <totalSizeCap>2GB</totalSizeCap>
+    </rollingPolicy>
+
+    <encoder>
+      <pattern><pattern>%date{ISO8601, UTC} %-5level [%thread] %logger{5} %mdc %msg%n</pattern></pattern>
+    </encoder>
+  </appender>
+
+  <root level="INFO">
+    <appender-ref ref="ROLLING" />
+  </root>
+</configuration>

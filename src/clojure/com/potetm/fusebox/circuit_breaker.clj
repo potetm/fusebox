@@ -17,53 +17,57 @@
 
 (defn slow-pct
   "The percent of calls currently tracked by the circuit breaker which are slow."
-  [{sc ::slow-count
-    tc ::total-count}]
-  (double (/ sc tc)))
+  [r]
+  (double (/ (::slow-count r)
+             (::total-count r))))
 
 
 (defn fail-pct
   "The percent of calls currently tracked by the circuit breaker which are failed."
-  [{fc ::failed-count
-    tc ::total-count}]
-  (double (/ fc tc)))
+  [r]
+  (double (/ (::failed-count r)
+             (::total-count r))))
 
 
 (defn slow|fail-pct
   "The percent of calls currently tracked by the circuit breaker which are either
   slow or failed."
-  [{fc ::failed-count
-    sc ::slow-count
-    tc ::total-count}]
-  (double (/ (+ fc sc)
-             tc)))
+  [r]
+  (double (/ (+ (::failed-count r)
+                (::total-count r))
+             (::total-count r))))
 
 
 (defn should-open?
   "Default implementation for determining whether to transition to a ::opened state."
-  [{s ::state
-    tc ::total-count :as cb}
+  [s
+   fc
+   sc
+   tc
    wait-for
    fail-threshold
    slow-threshold]
   (and (<= wait-for tc)
-       (or (= s ::half-opened)
-           (= s ::closed))
-       (or (< fail-threshold (fail-pct cb))
-           (< slow-threshold (slow-pct cb)))))
+       (or (identical? s ::half-opened)
+           (identical? s ::closed))
+       (or (< fail-threshold (double (/ fc tc)))
+           (< slow-threshold (double (/ sc tc))))))
 
 
 (defn should-close?
   "Default implementation for determining whether to transition to a ::closed state."
-  [{s ::state
-    tc ::total-count :as cb}
+  [s
+   fc
+   sc
+   tc
    wait-for
    fail-threshold
    slow-threshold]
   (and (<= wait-for tc)
-       (= s ::half-opened)
-       (< (fail-pct cb) fail-threshold)
-       (< (slow-pct cb) slow-threshold)))
+       (identical? s
+                   ::half-opened)
+       (< (double (/ fc tc)) fail-threshold)
+       (< (double (/ sc tc)) slow-threshold)))
 
 
 (defn next-state:default
@@ -73,21 +77,25 @@
   * :slow-pct - The decimal threshold to use to open the breaker due to slow calls (0, 1]
   * :wait-for-count - The number of calls to wait for after transitioning before transitioning again
   * :open->half-open-after-ms - Millis to wait before transitioning from ::opened to ::half-open"
-  [{fp :fail-pct
-    sp :slow-pct
-    wfc :wait-for-count
-    hoa :open->half-open-after-ms}
-   {s ::state :as cb}]
-  (cond
-    (and (= s ::opened)
-         (time-expired? cb hoa))
-    ::half-opened
+  [opts cb]
+  (let [fp (:fail-pct opts)
+        sp (:slow-pct opts)
+        wfc (:wait-for-count opts)
+        hoa (:open->half-open-after-ms opts)
+        s (::state cb)
+        fc (::failed-count cb)
+        sc (::slow-count cb)
+        tc (::total-count cb)]
+    (cond
+      (and (identical? s ::opened)
+           (time-expired? cb hoa))
+      ::half-opened
 
-    (should-open? cb wfc fp sp)
-    ::opened
+      (should-open? s fc sc tc wfc fp sp)
+      ::opened
 
-    (should-close? cb wfc fp sp)
-    ::closed))
+      (should-close? s fc sc tc wfc fp sp)
+      ::closed)))
 
 
 (defn init
@@ -104,7 +112,7 @@
     ::success?        - A function which takes a return value and determines
                         whether it was successful. If false, a ::failure is
                         recorded."
-  [{_ns ::next-state
+  [{ns ::next-state
     hs ::hist-size
     _hot ::half-open-tries
     _scm ::slow-call-ms
@@ -124,9 +132,12 @@
                                    ::slow-count 0
                                    ::failed-count 0
                                    ::total-count 0}
-                                  spec))
+                                  (dissoc spec
+                                          ::next-state
+                                          ::success?)))
    ;; putting this outside the atom makes it easier to access
    ;; in with-circuit-breaker*
+   ::next-state ns
    ::success? (or succ? (fn [_] true))})
 
 
@@ -159,9 +170,8 @@
       ::half-open-count (::half-open-tries prev))))
 
 
-(defn- allow? [cba]
-  (let [{s ::state
-         next-state ::next-state :as cb} @cba]
+(defn- allow? [cba next-state]
+  (let [{s ::state :as cb} @cba]
     (boolean
       (or (= s ::closed)
           (and (= s ::half-opened)
@@ -177,57 +187,53 @@
                        (= s ::closed)))))))))
 
 
-;; defn so we avoid allocation another anonymous function on every call
-(defn- record!* [{r ::record
-                  i ::record-idx
-                  rs ::hist-size
-                  sc ::slow-count
-                  fc ::failed-count
-                  tc ::total-count
-                  scms ::slow-call-ms
-                  next-state ::next-state :as cb} res duration-ms]
-  (let [{prev-f ::fails
-         prev-s ::slows} (get r i)
-        fails (if (= res ::failure)
-                1
-                0)
-        slows (if (and scms (< scms duration-ms))
-                1
-                0)
-        fc' (- (+ fc fails)
-               prev-f)
-        sc' (- (+ sc slows)
-               prev-s)
-        tc' (min (inc tc) rs)
-        cb' (assoc cb
-              ::record (assoc r
-                         i {::fails fails
-                            ::slows slows})
-              ::record-idx (mod (inc i) rs)
-              ::failed-count fc'
-              ::slow-count sc'
-              ::total-count tc')
-        s' (next-state cb')]
-    (cond-> cb'
-      s' (transition s'))))
-
-
-(defn record! [cba res duration-ms]
+(defn record! [cba next-state res duration-ms]
   (swap! cba
-         record!*
-         res
-         duration-ms))
+         ;; Don't fall into the varargs arity of swap!
+         (fn [{r ::record
+               i ::record-idx
+               rs ::hist-size
+               sc ::slow-count
+               fc ::failed-count
+               tc ::total-count
+               scms ::slow-call-ms :as cb}]
+           (let [{prev-f ::fails
+                  prev-s ::slows} (get r i)
+                 fails (if (= res ::failure)
+                         1
+                         0)
+                 slows (if (and scms (< scms duration-ms))
+                         1
+                         0)
+                 fc' (- (+ fc fails)
+                        prev-f)
+                 sc' (- (+ sc slows)
+                        prev-s)
+                 tc' (min (inc tc) rs)
+                 cb' (-> cb
+                         (assoc ::record (assoc r
+                                           i {::fails fails
+                                              ::slows slows}))
+                         (assoc ::record-idx (mod (inc i) rs))
+                         (assoc ::failed-count fc')
+                         (assoc ::slow-count sc')
+                         (assoc ::total-count tc'))
+                 s' (next-state cb')]
+             (cond-> cb'
+               s' (transition s'))))))
 
 
 (defn with-circuit-breaker* [{cb ::circuit-breaker
+                              ns ::next-state
                               succ? ::success? :as spec} f]
   (if-not cb
     (f)
-    (if (allow? cb)
+    (if (allow? cb ns)
       (let [start (Instant/now)]
         (util/try-interruptible
           (let [ret (f)]
             (record! cb
+                     ns
                      (if (succ? ret)
                        ::success
                        ::failure)
@@ -236,6 +242,7 @@
             ret)
           (catch Exception e
             (record! cb
+                     ns
                      ::failure
                      (.toMillis (Duration/between start
                                                   (Instant/now))))

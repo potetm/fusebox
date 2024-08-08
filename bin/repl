@@ -6,5 +6,6 @@ cd "$(dirname "$0")"/..
 
 clj \
   -J-Dfusebox.usePlatformThreads=false \
+  -J-Dlogback.configurationFile=logback-dev.xml \
   -M:dev \
   -m nrepl.cmdline

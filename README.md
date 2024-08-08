@@ -420,6 +420,18 @@ You can merge them:
                  ::bh/wait-timeout-ms 100}))
 ```
 
+You can tack them into your components on startup (this is what I do most of the time):
+
+```clj
+(defmethod ig/init-key ::my-component [k args]
+  (merge args
+         (retry/init {::retry/retry? (fn [n ms ex]
+                                       (< n 10))
+                      ::retry/delay (fn [n ms ex]
+                                      (min (retry/delay-exp n)
+                                           5000))})))
+```
+
 Or all of the above!
 
 ### Overriding Values
