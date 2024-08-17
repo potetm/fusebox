@@ -10,7 +10,7 @@
 
 
 (def lib 'com.potetm/fusebox)
-(def version "0.1.0-SHAPSHOT")
+(def version "1.0.0")
 (def jar-file (str "target/fusebox-" version ".jar"))
 (def sources ["src"])
 (def classes "target/classes")
