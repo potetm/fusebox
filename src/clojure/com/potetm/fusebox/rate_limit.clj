@@ -1,6 +1,7 @@
 (ns com.potetm.fusebox.rate-limit
   (:require
     [com.potetm.fusebox :as-alias fb]
+    [com.potetm.fusebox.error :as-alias err]
     [com.potetm.fusebox.util :as util])
   (:import
     (java.util.concurrent ExecutorService
@@ -65,7 +66,7 @@
                            to
                            TimeUnit/MILLISECONDS)
       (throw (ex-info "Timeout waiting for rate limiter"
-                      {::fb/error ::timeout-waiting-for-rate-limiter
+                      {::fb/error ::err/timeout-waiting-for-rate-limiter
                        ::fb/spec spec
                        ::wait-timeout-ms to}))))
   (f))

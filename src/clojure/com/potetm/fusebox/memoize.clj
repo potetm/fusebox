@@ -17,7 +17,7 @@
     ::fn - The function to memoize
 
   ::fn is guaranteed to be called once."
-  [spec]
+  [{_fn ::fn :as spec}]
   (util/assert-keys "Memoize"
                     {:req-keys [::fn]}
                     spec)

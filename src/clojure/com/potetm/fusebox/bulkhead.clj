@@ -1,6 +1,7 @@
 (ns com.potetm.fusebox.bulkhead
   (:require
     [com.potetm.fusebox :as-alias fb]
+    [com.potetm.fusebox.error :as-alias err]
     [com.potetm.fusebox.util :as util])
   (:import
     (java.util.concurrent Semaphore
@@ -13,7 +14,8 @@
   spec is a map containing:
     ::concurrency     - the integer number of concurrent callers to allow
     ::wait-timeout-ms - max millis a thread will wait to enter bulkhead"
-  [{c ::concurrency :as spec}]
+  [{c ::concurrency
+    _wt ::wait-timeout-ms :as spec}]
   (util/assert-keys "Bulkhead"
                     {:req-keys [::concurrency
                                 ::wait-timeout-ms]}
@@ -37,7 +39,7 @@
         (.release s)))
 
     :else (throw (ex-info "fusebox timeout"
-                          {::fb/error ::timeout-waiting-for-bulkhead
+                          {::fb/error ::err/timeout-waiting-for-bulkhead
                            ::fb/spec (util/pretty-spec spec)}))))
 
 

@@ -1,6 +1,7 @@
 (ns com.potetm.fusebox.timeout
   (:require
     [com.potetm.fusebox :as-alias fb]
+    [com.potetm.fusebox.error :as-alias err]
     [com.potetm.fusebox.util :as util])
   (:import
     (java.util.concurrent ExecutorService
@@ -69,7 +70,7 @@
         (catch TimeoutException to
           (.cancel fut intr?)
           (throw (ex-info "fusebox timeout"
-                          {::fb/error ::exec-timeout
+                          {::fb/error ::err/exec-timeout
                            ::fb/spec (util/pretty-spec spec)})))))))
 
 

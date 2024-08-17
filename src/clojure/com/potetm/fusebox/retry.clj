@@ -1,6 +1,8 @@
 (ns com.potetm.fusebox.retry
   (:require
+    [clojure.math :as math]
     [com.potetm.fusebox :as-alias fb]
+    [com.potetm.fusebox.error :as-alias err]
     [com.potetm.fusebox.util :as util])
   (:import
     (java.util.concurrent ThreadLocalRandom)))
@@ -32,24 +34,6 @@
   spec)
 
 
-(def ^{:dynamic true
-       :doc
-       "The number of times a call has been previously attempted.
-
-       This is intended primarily for diagnostic purposes (e.g. occasional
-       logging or metrics) in lieu of callback hooks."}
-  *retry-count*)
-
-
-(def ^{:dynamic true
-       :doc
-       "The approximate time spent attempting a call.
-
-       This is intended primarily for diagnostic purposes (e.g. occasional
-       logging or metrics) in lieu of callback hooks."}
-  *exec-duration-ms*)
-
-
 (def always-success
   (fn [_] true))
 
@@ -60,18 +44,16 @@
                :or {succ? always-success} :as spec}
               f]
   (if-not retry?
-    (f)
+    (f nil nil)
     (let [start (System/currentTimeMillis)
           exec-dur #(- (System/currentTimeMillis)
                        start)]
       (loop [n 0]
         (let [[ret v] (util/try-interruptible
-                        (binding [*retry-count* n
-                                  *exec-duration-ms* (exec-dur)]
-                          (let [v (f)]
-                            (if (succ? v)
-                              [::succ v]
-                              [::err v])))
+                        (let [v (f n (exec-dur))]
+                          (if (succ? v)
+                            [::succ v]
+                            [::err v]))
                         (catch Exception e
                           [::err e]))]
           (case ret
@@ -87,7 +69,7 @@
                                                v))
                           (recur n'))
                       (throw (ex-info "fusebox retries exhausted"
-                                      {::fb/error ::retries-exhausted
+                                      {::fb/error ::err/retries-exhausted
                                        ::num-retries n
                                        ::exec-duration-ms ed
                                        ::fb/spec (util/pretty-spec spec)}
@@ -98,9 +80,8 @@
   "Calculate an exponential delay in millis.
 
   retry-count - the number of previous attempts"
-  [retry-count]
-  (long (* 100
-           (Math/pow 2 retry-count))))
+  ^long [retry-count]
+  (long (math/scalb 100 retry-count)))
 
 
 (defn delay-linear
@@ -108,7 +89,7 @@
 
   factor      - the linear factor to use
   retry-count - the number of previous attempts"
-  [factor retry-count]
+  ^long [factor retry-count]
   (long (* retry-count
            factor)))
 
@@ -118,7 +99,7 @@
 
   jitter-factor - the decimal jitter percentage, between 0 and 1
   delay         - the base delay in millis"
-  [jitter-factor delay]
+  ^long [jitter-factor delay]
   (let [jit (long (* jitter-factor
                      delay))]
     (+ delay
@@ -131,7 +112,7 @@
   "Evaluates body, retrying according to the provided retry spec."
   [spec & body]
   `(retry* ~spec
-           (fn [] ~@body)))
+           (fn [count# duration#] ~@body)))
 
 
 (defn shutdown [spec])

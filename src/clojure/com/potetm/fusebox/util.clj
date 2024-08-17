@@ -80,7 +80,9 @@
   ([spec]
    (dissoc spec
            ::cb/circuit-breaker
+           ::cb/next-state
            ::cb/success?
+           ::cb/lock
            ::memo/fn
            ::fallback/fallback
            ::rl/bg-exec

@@ -37,17 +37,17 @@
       (swallow-ex (cb/with-circuit-breaker cb
                     (throw (ex-info "" {}))))
       (is (= ::cb/half-opened
-             (::cb/state (cb/current cb))))
+             (.-state (cb/current cb))))
       (swallow-ex (cb/with-circuit-breaker cb
                     (throw (ex-info "" {}))))
       (is (= ::cb/half-opened
-             (::cb/state (cb/current cb))))
+             (.-state (cb/current cb))))
       (is (= 2
              (cb/with-circuit-breaker cb
                (+ 1 1))))
       ;; open now because 2/3 half-open calls failed
       (is (= ::cb/opened
-             (::cb/state (cb/current cb))))
+             (.-state (cb/current cb))))
       (is (thrown-with-msg? ExceptionInfo
                             #"fusebox circuit breaker open"
                             (cb/with-circuit-breaker cb
@@ -57,13 +57,90 @@
              (cb/with-circuit-breaker cb
                (+ 1 1))))
       (is (= ::cb/half-opened
-             (::cb/state (cb/current cb))))
+             (.-state (cb/current cb))))
       (dotimes [_ 2]
         (is (= 2
                (cb/with-circuit-breaker cb
                  (+ 1 1)))))
       (is (= ::cb/closed
-             (::cb/state (cb/current cb))))))
+             (.-state (cb/current cb))))))
+
+  (testing "half-open wait-for-count will min with ::cb/half-open-tries"
+    (let [cb (cb/init {::cb/next-state (partial cb/next-state:default
+                                                {:fail-pct 0.5
+                                                 :slow-pct 0.5
+                                                 :wait-for-count 10
+                                                 :open->half-open-after-ms 100})
+                       ::cb/hist-size 10
+                       ::cb/half-open-tries 3
+                       ::cb/slow-call-ms 100})]
+      (dotimes [_ 10]
+        (cb/with-circuit-breaker cb
+          (+ 1 1)))
+
+      (dotimes [_ 6]
+        (swallow-ex (cb/with-circuit-breaker cb
+                      (throw (ex-info "" {})))))
+
+      (is (thrown-with-msg? ExceptionInfo
+                            #"fusebox circuit breaker open"
+                            (cb/with-circuit-breaker cb
+                              (+ 1 1))))
+      (Thread/sleep 100)
+
+      (cb/with-circuit-breaker cb
+        (+ 1 1))
+
+      (is (= ::cb/half-opened
+             (.-state (cb/current cb))))
+
+      (dotimes [_ 2]
+        (cb/with-circuit-breaker cb
+          (+ 1 1)))
+
+      (is (= ::cb/closed
+             (.-state (cb/current cb))))))
+
+
+  (testing "half-open fail-pct equals actual fail pct"
+    (let [cb (cb/init {::cb/next-state (partial cb/next-state:default
+                                                {:fail-pct 0.5
+                                                 :slow-pct 0.5
+                                                 :wait-for-count 10
+                                                 :open->half-open-after-ms 100})
+                       ::cb/hist-size 10
+                       ::cb/half-open-tries 10
+                       ::cb/slow-call-ms 100})]
+      (dotimes [_ 10]
+        (cb/with-circuit-breaker cb
+          (+ 1 1)))
+
+      (dotimes [_ 6]
+        (swallow-ex (cb/with-circuit-breaker cb
+                      (throw (ex-info "" {})))))
+
+      (is (thrown-with-msg? ExceptionInfo
+                            #"fusebox circuit breaker open"
+                            (cb/with-circuit-breaker cb
+                              (+ 1 1))))
+      (Thread/sleep 100)
+
+      (cb/with-circuit-breaker cb
+        (+ 1 1))
+
+      (is (= ::cb/half-opened
+             (.-state (cb/current cb))))
+
+      (dotimes [_ 4]
+        (cb/with-circuit-breaker cb
+          (+ 1 1)))
+
+      (dotimes [_ 5]
+        (swallow-ex (cb/with-circuit-breaker cb
+                      (throw (ex-info "" {})))))
+
+      (is (= ::cb/closed
+             (.-state (cb/current cb))))))
 
   (testing "::success fn"
     (let [cb (cb/init {::cb/next-state (partial cb/next-state:default
@@ -116,17 +193,6 @@
       (is (= 2 (cb/with-circuit-breaker cb
                  (+ 1 1))))))
 
-  (testing "force opened"
-    (let [cb (cb/init {::cb/next-state (constantly nil)
-                       ::cb/state ::cb/opened
-                       ::cb/hist-size 10
-                       ::cb/half-open-tries 3
-                       ::cb/slow-call-ms 10})]
-      (dotimes [i 20]
-        (is (thrown? ExceptionInfo
-                     (cb/with-circuit-breaker cb
-                       (inc i)))))))
-
   (testing "noop"
     (is (= 123
            (cb/with-circuit-breaker {:something 'else}
@@ -140,3 +206,27 @@
     (is (thrown-with-msg? ExceptionInfo
                           #"(?i)invalid"
                           (cb/init {::cb/hist-size 100})))))
+
+
+
+(comment
+  (def cb (cb/init {::cb/next-state (partial cb/next-state:default
+                                             {:fail-pct 0.4
+                                              :slow-pct 0.4
+                                              :wait-for-count 3
+                                              :open->half-open-after-ms 100})
+                    ::cb/success? even?
+                    ::cb/hist-size 10
+                    ::cb/half-open-tries 3
+                    ::cb/slow-call-ms 100}))
+  (dotimes [i 3]
+    (cb/with-circuit-breaker cb
+      (inc i)))
+
+  cb
+
+
+  (is (thrown-with-msg? ExceptionInfo
+                        #"fusebox circuit breaker open"
+                        (cb/with-circuit-breaker cb
+                          (+ 1 1)))))

@@ -65,37 +65,38 @@
       (is (= ret 10))))
 
 
-  (testing "retry/*retry-count*"
+  (testing "retry count arg"
     (testing "base case"
       (let [invokes-count (atom -1)]
         (try
-          (retry/with-retry (retry/init {::retry/retry? (fn [n ms ex]
-                                                          (< n 10))
-                                         ::retry/delay (constantly 1)
-                                         ::retry/success? (fn [i]
-                                                            (< 5 i))})
-            (is (= (swap! invokes-count inc)
-                   retry/*retry-count*)))
+          (retry/retry* (retry/init {::retry/retry? (fn [n ms ex]
+                                                      (< n 10))
+                                     ::retry/delay (constantly 1)
+                                     ::retry/success? (fn [i]
+                                                        (< 5 i))})
+                        (fn [c dur]
+                          (is (= (swap! invokes-count inc)
+                                 c))))
           (catch ExceptionInfo ei
             ::fail)))))
 
 
-  (testing "retry/*exec-duration-ms*"
+  (testing "exec duration arg"
     (testing "base case"
       (let [last-ms (atom 0)]
         (try
-          (retry/with-retry (retry/init {::retry/retry? (fn [n ms ex]
-                                                          (< n 100))
-                                         ::retry/delay (constantly 1)})
-            (let [edm retry/*exec-duration-ms*]
-              (when-not (zero? retry/*retry-count*)
-                ;; This is guaranteed to fail due to clock skew
-                ;; but this gives us a good idea that, generally speaking,
-                ;; it's working as designed.
-                (is (< (first (reset-vals! last-ms edm))
-                       edm)
-                    "exec-duration-ms only increases"))
-              (throw (ex-info "" {}))))
+          (retry/retry* (retry/init {::retry/retry? (fn [n ms ex]
+                                                      (< n 100))
+                                     ::retry/delay (constantly 1)})
+                        (fn [c edm]
+                          (when-not (zero? c)
+                            ;; This is guaranteed to fail due to clock skew
+                            ;; but this gives us a good idea that, generally speaking,
+                            ;; it's working as designed.
+                            (is (< (first (reset-vals! last-ms edm))
+                                   edm)
+                                "exec-duration-ms only increases"))
+                          (throw (ex-info "" {}))))
           (catch ExceptionInfo ei
             ::fail)))))
 

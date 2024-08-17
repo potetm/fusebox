@@ -14,7 +14,7 @@ Clojure is a simple language. We deserve a simple resilience library.
 
 Fusebox was designed to have the following properties:
 
-* Fast
+* [Fast](./docs/benchmarks.md)
 * Prefer pure functions to additional options
 * Modular (load only what you need)
 * Linear execution
@@ -26,7 +26,7 @@ Fusebox was designed to have the following properties:
 
 Lastly, my hope is that you will look at some of the code and realize how
 straightforward it is. It's almost laughable. These utilities are identical to
-Resilience4j at their core, but thanks to immutable data, namespaced keys, and a
+Resilience4J at their core, but thanks to immutable data, namespaced keys, and a
 dash of macros, Clojure affords us _much_ simpler implementations.
 
 ## Usage
@@ -46,6 +46,8 @@ dash of macros, Clojure affords us _much_ simpler implementations.
   * [spec maps](#spec-maps)
   * [Overriding Values](#overriding-values)
   * [Virtual Threads](#virtual-threads)
+  * [Exceptions](#exceptions)
+* [Benchmarks](./docs/benchmarks.md)
 
 ### Bulkhead
 ```clj
@@ -67,11 +69,11 @@ dash of macros, Clojure affords us _much_ simpler implementations.
 (require '[com.potetm.fusebox.circuit-breaker :as cb])
 
 (def circuit-breaker
-  (cb/init {::cb/next-state (partial cb/next-state:default
-                                     {:fail-pct 0.5
-                                      :slow-pct 0.5
-                                      :wait-for-count 3
-                                      :open->half-open-after-ms 100})
+  (cb/init {::cb/next-state #(cb/next-state:default {:fail-pct 0.5
+                                                     :slow-pct 0.5
+                                                     :wait-for-count 100
+                                                     :open->half-open-after-ms 100}
+                                                     %)
             ::cb/hist-size 10
             ::cb/half-open-tries 3
             ::cb/slow-call-ms 100}))
@@ -80,22 +82,29 @@ dash of macros, Clojure affords us _much_ simpler implementations.
   (run))
 ```
 
-* `::cb/next-state` - fn taking the current circuit breaker and returning the next
+* `::cb/next-state` - fn taking the current `Record` record and returning the next
                       state or nil if no transition is necessary. See `cb/next-state:default`
                       for a default implementation. Return value must be one of:
-                      `::cb/closed`, `::cb/half-open`, `::cb/open`
+                      `::cb/closed`, `::cb/half-opened`, `::cb/opened`
 * `::cb/hist-size` - The number of calls to track
-* `::cb/half-open-tries` - The number of calls to allow in a `::cb/half-open` state
-* `::cb/slow-call-ms` - Milli threshold to label a call slow
-* `::cb/success?` - A function which takes a return value and determines
+* `::cb/half-open-tries` - The number of calls to allow in a `::cb/half-opened` state
+* `::cb/slow-call-ms` - Millisecond threshold to label a call slow
+* `::cb/success?` - (Optional) A function which takes a return value and determines
                     whether it was successful. If false, a `::cb/failure` is
-                    recorded.
+                    recorded. Defaults to `(constantly true)`.
 
 By far, the trickiest part of Fusebox is `::cb/next-state`. It will be run on
-every invocation, so it must be fast. That said, with `cb/next-state:default` as
-a guide, it's straightforward enough to implement a custom `::cb/next-state`
-function. There are a variety of helpers in `com.potetm.fusebox.circuit-breaker`
-to help you.
+every invocation, so it must be fast. That said, with `cb/next-state:default` should
+work for the vast majority of use cases. In addition, using it as a guide, it's 
+straightforward enough to implement a custom `::cb/next-state` function. There are
+a variety of helpers in `com.potetm.fusebox.circuit-breaker` to help you.
+
+`cb/next-state:default` takes the following parameters in the first argument:
+
+* `:fail-pct` - The decimal threshold to use to open the breaker due to failed calls (0, 1]
+* `:slow-pct` - The decimal threshold to use to open the breaker due to slow calls (0, 1]
+* `:wait-for-count` - The number of calls to wait for after transitioning before transitioning again
+* `:open->half-open-after-ms` - Millis to wait before transitioning from `::opened` to `::half-opened`
 
 ### Fallback
 ```clj
@@ -129,9 +138,9 @@ to help you.
 Most production applications will want to use a cache instead of memoize. It's included
 in this library for three reasons:
 
-* Memoize makes sense for a small subset of use cases.
-* `clojure.core/memoize` will re-run its fn under contention, and you probably want to avoid it.
-* To show a good setup for [caching](https://github.com/ben-manes/caffeine).
+1. Memoize makes sense for a small subset of use cases.
+2. `clojure.core/memoize` will re-run its fn under contention, and you probably want to avoid it.
+3. To show a good template for setting up a [cache](https://github.com/ben-manes/caffeine).
 
 ### Rate Limit
 ```clj
@@ -178,14 +187,18 @@ For example the following spec turns the above rate limiter into a leaky bucket:
 ```
 
 * `::retry/retry?` - A predicate called after an exception to determine whether
-                     body should be retried. Takes three args: eval-count,
-                     exec-duration-ms, and the exception/failing value.
+                     body should be retried. Takes three args: 
+  * eval-count
+  * exec-duration-ms
+  * the exception/failing value
 * `::retry/delay` - A function which calculates the delay in millis to
                     wait prior to the next evaluation. Takes three args:
-                    eval-count, exec-duration-ms, and the exception/failing value.
+  * eval-count
+  * exec-duration-ms
+  * the exception/failing value
 * `::success?` - (Optional) A function which takes a return value and determines
                  whether it was successful. If false, body is retried.
-                 Defaults to (constantly true).
+                 Defaults to `(constantly true)`.
 
 There are a few in `com.potetm.fusebox.retry` that will help you write a
 `::retry/delay` fn:
@@ -194,20 +207,21 @@ There are a few in `com.potetm.fusebox.retry` that will help you write a
 * `delay-linear`
 * `jitter` — Used in tandem with a base delay, e.g. `(jitter 10 (delay-linear 100 count))`
 
-To aid in diagnostic feedback, two dynamic vars are provided:
+To aid in diagnostic feedback, you can optionally call `retry/retry*` directly
+with a function that takes two args:
 
-* `com.potetm.fusebox.retry/*retry-count*` - number of retries attempted (starts at zero)
-* `com.potetm.fusebox.retry/*exec-duration-ms*` - total execution duration in millis
+* `retry-count` - number of retries attempted (starts at zero)
+* `exec-duration-ms` - total execution duration in millis
 
-These are bound prior to invocation of your body, so you should feel free to use
-them in order to e.g. log or send events:
+For example:
 
 ```clj
-(retry/with-retry retry
-  (when (pos? retry/*retry-count*)
-    (log/warn "Retrying my call!"
-              {:retry-count retry/*retry-count*}))
-  (run))
+(retry/retry* retry
+              (fn [retry-count exec-duration-ms]
+                (when (pos? retry-count)
+                  (log/warn "Retrying!"
+                            {:retry-count retry-count}))
+                (something-that-needs-retries)))
 ```
 
 Of course, feel free to macro/wrap to taste.
@@ -225,6 +239,7 @@ Of course, feel free to macro/wrap to taste.
 
 * `::timeout-ms` - millis to wait before timing out
 * `::interrupt?` - bool indicated whether a timed-out thread should be interrupted on timeout
+  (Defaults to `true`).
 
 ### Register
 ```clj
@@ -248,7 +263,7 @@ Registry is included for the following reasons:
 3. It was easy to do.
 
 That said, you shouldn't feel compelled to use it where a `def` or argument passing
-will suffice.
+would suffice.
 
 ### Bulwark
 ```clj
@@ -472,14 +487,23 @@ blocks, you'll want to disable them with the startup flag `-Dfusebox.usePlatform
 clj -J-Dfusebox.usePlatformThreads=true ...
 ```
 
+### Exceptions
+Fusebox only throws `ExceptionInfo`s. All Fusebox exceptions will have `ex-data`
+with the key `com.potetm.fusebox/error` and a keyword value that indicates the
+error condition triggered (e.g. `com.potetm.fusebox.error/exec-timeout`).
+
 ## Acknowledgements
 This library pulls heavily from [Resilience4J](https://resilience4j.readme.io/). I owe
 them a huge debt of gratitude for all of their work.
 
-Also, [Failsafe](https://failsafe.dev/) was an inspiration for early versions of
-Fusebox and for the [Fallback](#fallback) utility.
+[Failsafe](https://failsafe.dev/) was an inspiration for early versions of Fusebox 
+and for the [Fallback](#fallback) utility.
+
+Benchmarks were acquired using [JMH](https://github.com/openjdk/jmh) and
+[jmh-clojure](https://github.com/jgpc42/jmh-clojure/). These uncovered some
+performance problems that triggered small design changes.
 
 ## License
-Copyright © 2016 Timothy Pote
+Copyright © 2016-2024 Timothy Pote
 
 Distributed under the Eclipse Public License either version 1.0 or (at your option) any later version.
