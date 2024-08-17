@@ -3,7 +3,7 @@ An extremely lightweight resilience library for Clojure
 
 ## Current Release
 ```clj
-com.potetm/fusebox {:mvn/version "1.0.0"}
+com.potetm/fusebox {:mvn/version "1.0.1"}
 ```
 
 ## Rationale
