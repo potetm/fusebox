@@ -3,7 +3,7 @@ An extremely lightweight resilience library for Clojure
 
 ## Current Release
 ```clj
-com.potetm/fusebox {:mvn/version "0.1.0-SHAPSHOT"}
+com.potetm/fusebox {:mvn/version "1.0.0"}
 ```
 
 ## Rationale
@@ -95,7 +95,7 @@ dash of macros, Clojure affords us _much_ simpler implementations.
 
 By far, the trickiest part of Fusebox is `::cb/next-state`. It will be run on
 every invocation, so it must be fast. That said, with `cb/next-state:default` should
-work for the vast majority of use cases. In addition, using it as a guide, it's 
+work for the vast majority of use cases. In addition, using it as a guide, it's
 straightforward enough to implement a custom `::cb/next-state` function. There are
 a variety of helpers in `com.potetm.fusebox.circuit-breaker` to help you.
 
@@ -187,7 +187,7 @@ For example the following spec turns the above rate limiter into a leaky bucket:
 ```
 
 * `::retry/retry?` - A predicate called after an exception to determine whether
-                     body should be retried. Takes three args: 
+                     body should be retried. Takes three args:
   * eval-count
   * exec-duration-ms
   * the exception/failing value
@@ -496,7 +496,7 @@ error condition triggered (e.g. `com.potetm.fusebox.error/exec-timeout`).
 This library pulls heavily from [Resilience4J](https://resilience4j.readme.io/). I owe
 them a huge debt of gratitude for all of their work.
 
-[Failsafe](https://failsafe.dev/) was an inspiration for early versions of Fusebox 
+[Failsafe](https://failsafe.dev/) was an inspiration for early versions of Fusebox
 and for the [Fallback](#fallback) utility.
 
 Benchmarks were acquired using [JMH](https://github.com/openjdk/jmh) and
