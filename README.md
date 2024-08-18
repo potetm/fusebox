@@ -3,7 +3,7 @@ An extremely lightweight resilience library for Clojure
 
 ## Current Release
 ```clj
-com.potetm/fusebox {:mvn/version "1.0.1"}
+com.potetm/fusebox {:mvn/version "1.0.2"}
 ```
 
 ## Rationale
@@ -207,22 +207,23 @@ There are a few in `com.potetm.fusebox.retry` that will help you write a
 * `delay-linear`
 * `jitter` — Used in tandem with a base delay, e.g. `(jitter 10 (delay-linear 100 count))`
 
-To aid in diagnostic feedback, you can optionally call `retry/retry*` directly
-with a function that takes two args:
+To aid in diagnostic feedback, you can optionally insert bindings for:
 
 * `retry-count` - number of retries attempted (starts at zero)
 * `exec-duration-ms` - total execution duration in millis
 
-For example:
+These bindings are the first arguments to `with-retry`. For example:
 
 ```clj
-(retry/retry* retry
-              (fn [retry-count exec-duration-ms]
-                (when (pos? retry-count)
-                  (log/warn "Retrying!"
-                            {:retry-count retry-count}))
-                (something-that-needs-retries)))
+(retry/with-retry [retry-count exec-duration-ms] retry
+  (when (and retry-count (pos? retry-count))
+    (log/warn "Retrying!"
+              {:retry-count retry-count}))
+  (something-that-needs-retries))
 ```
+
+NOTE: If you choose to use these bindings, it's advised that you nil-guard your
+usage in order to preserve [pass-through invocations](#pass-through-invocations).
 
 Of course, feel free to macro/wrap to taste.
 

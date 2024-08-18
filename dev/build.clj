@@ -10,7 +10,7 @@
 
 
 (def lib 'com.potetm/fusebox)
-(def version "1.0.1")
+(def version "1.0.2") ;; Did you update the README?
 (def jar-file (str "target/fusebox-" version ".jar"))
 (def sources ["src"])
 (def classes "target/classes")

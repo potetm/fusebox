@@ -110,9 +110,12 @@
 
 (defmacro with-retry
   "Evaluates body, retrying according to the provided retry spec."
-  [spec & body]
-  `(retry* ~spec
-           (fn [count# duration#] ~@body)))
+  [bindings|spec & [spec|body & body :as b]]
+  (if (vector? bindings|spec)
+    `(retry* ~spec|body
+       (fn ~bindings|spec ~@body))
+    `(retry* ~bindings|spec
+       (fn [count# duration#] ~@b))))
 
 
 (defn shutdown [spec])
