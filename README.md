@@ -1,14 +1,14 @@
 # Fusebox
-An extremely lightweight resilience library for Clojure
+An extremely lightweight fault tolerance library for Clojure
 
 ## Current Release
 ```clj
-com.potetm/fusebox {:mvn/version "1.0.2"}
+com.potetm/fusebox {:mvn/version "1.0.3"}
 ```
 
 ## Rationale
-Resilience libraries—both in Java and in Clojure—are heavyweight, have dozens of
-options, are callback-driven, and have extremely complicated execution models.
+Fault tolerance libraries—both in Java and in Clojure—are heavyweight, have dozens
+of options, are callback-driven, and have extremely complicated execution models.
 
 Clojure is a simple language. We deserve a simple resilience library.
 
@@ -17,11 +17,10 @@ Fusebox was designed to have the following properties:
 * [Fast](./docs/benchmarks.md)
 * Prefer pure functions to additional options
 * Modular (load only what you need)
-* Linear execution
-* No callbacks
-* Prefer Virtual Threads when available
+* Linear execution (no callbacks)
 * Use simple, un-nested hashmaps with namespaced keys
-* Zero dependencies
+* Prefer Virtual Threads when available
+* One dependency: [clojure/tools.logging](https://github.com/clojure/tools.logging)
 * Support a variety of usage patterns
 
 Lastly, my hope is that you will look at some of the code and realize how
@@ -31,6 +30,7 @@ dash of macros, Clojure affords us _much_ simpler implementations.
 
 ## Usage
 ### Table of Contents
+* [What is a Fault Tolerance Library?](#what-is-a-fault-tolerance-libarary)
 * [Bulkhead](#bulkhead)
 * [Circuit Breaker](#circuit-breaker)
 * [Fallback](#fallback)
@@ -47,7 +47,41 @@ dash of macros, Clojure affords us _much_ simpler implementations.
   * [Overriding Values](#overriding-values)
   * [Virtual Threads](#virtual-threads)
   * [Exceptions](#exceptions)
+  * [Why `tool.logging`?](#why-toolslogging)
 * [Benchmarks](./docs/benchmarks.md)
+
+### What is a Fault Tolerance Library?
+A fault tolerance library is a collection of utilities designed to keep your system
+running in the face of latency and errors. They help keep your application up and
+running, _and_ they help ensure that your application doesn't overwhelm another part
+of the system.
+
+If your application makes or receives network calls, you probably want to be using a
+fault tolerance library.
+
+The most in-depth treatment for fault tolerance is [_Release It!_](https://www.amazon.com/dp/1680502395/)
+by Michael Nygard. It is the only book that I would consider mandatory for software
+engineers. I highly recommend you read it.
+
+That said, here is a short motivator for each utility:
+
+* [Bulkhead](#bulkhead): Limits the number of threads that can make a certain call or group of
+  calls. It ensures your application doesn't lock up when another application is
+  slow.
+* [Circuit Breaker](#circuit-breaker): Detects when another application is slow or failing, and stops
+  your application from making it worse by continuing to call it.
+* [Fallback](#fallback): Provides your application a value to use while a failing application
+  is unavailable.
+* [Memoize](#memoize): A rudimentary cache you can use to reduce load on other applications.
+  (If you're considering using this, you should see if a true [cache](https://github.com/ben-manes/caffeine)
+  makes more sense.)
+* [Rate Limit](#rate-limit): Limits the rate at which your application calls another application.
+  Many times rate limits are part of an application's SLA, and using a rate limiter
+  lets you easily abide by the SLA.
+* [Retry](#retry): Retries a call in the event of failure.
+* [Timeout](#timeout): Sets a self-imposed time limit for a response from another
+  application. Ensures your application remains responsive when another application
+  is slow.
 
 ### Bulkhead
 ```clj
@@ -205,7 +239,16 @@ There are a few in `com.potetm.fusebox.retry` that will help you write a
 
 * `delay-exp`
 * `delay-linear`
-* `jitter` — Used in tandem with a base delay, e.g. `(jitter 10 (delay-linear 100 count))`
+* `jitter` — Used in tandem with a base delay, e.g. `(jitter 0.10 (delay-linear 100 count))`
+
+You probably want your `::retry/delay` fn to cap the dlay with a call to `min`
+like so:
+
+```
+(jitter 0.10
+        (min (delay-exp 100 count)
+             10000))
+```
 
 To aid in diagnostic feedback, you can optionally insert bindings for:
 
@@ -241,6 +284,11 @@ Of course, feel free to macro/wrap to taste.
 * `::timeout-ms` - millis to wait before timing out
 * `::interrupt?` - bool indicated whether a timed-out thread should be interrupted on timeout
   (Defaults to `true`).
+
+The timeout namespace also includes a macro `try-interruptible` that you should
+prefer instead of traditional `try` when using `with-timeout`. It guarantees that
+`InterruptedException` is rethrown instead of swallowed, which is the only way to
+stop a thread on the JVM.
 
 ### Register
 ```clj
@@ -492,6 +540,13 @@ clj -J-Dfusebox.usePlatformThreads=true ...
 Fusebox only throws `ExceptionInfo`s. All Fusebox exceptions will have `ex-data`
 with the key `com.potetm.fusebox/error` and a keyword value that indicates the
 error condition triggered (e.g. `com.potetm.fusebox.error/exec-timeout`).
+
+### Why `tools.logging`?
+There is exactly one spot which cannot be reached in application code where you
+probably want some feedback: In the [retry](#retry) utility, once it's been
+decided that a retry will happen, and it's about to call `Thread/sleep`. The
+only options for getting feedback are: add logging in Fusebox, or add a callback.
+I've opted for the former.
 
 ## Acknowledgements
 This library pulls heavily from [Resilience4J](https://resilience4j.readme.io/). I owe

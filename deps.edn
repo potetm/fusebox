@@ -1,6 +1,7 @@
 {:paths ["src"]
 
- :deps {org.clojure/clojure {:mvn/version "1.11.4"}}
+ :deps {org.clojure/clojure {:mvn/version "1.11.4"}
+        org.clojure/tools.logging {:mvn/version "1.3.0"}}
 
  :aliases {:dev {:extra-paths ["dev" "resources-dev" "test" "target/classes"]
                  :extra-deps {nrepl/nrepl {:mvn/version "0.6.0"}

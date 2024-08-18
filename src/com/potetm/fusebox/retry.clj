@@ -1,6 +1,7 @@
 (ns com.potetm.fusebox.retry
   (:require
     [clojure.math :as math]
+    [clojure.tools.logging :as log]
     [com.potetm.fusebox :as-alias fb]
     [com.potetm.fusebox.error :as-alias err]
     [com.potetm.fusebox.util :as util])
@@ -63,11 +64,15 @@
                     (if (retry? n'
                                 ed
                                 v)
-                      (do (Thread/sleep ^long
-                                        (delay n'
-                                               ed
-                                               v))
-                          (recur n'))
+                      (let [d (delay n'
+                                     ed
+                                     v)]
+                        (do (log/info "fusebox retrying"
+                                      {:count n'
+                                       :exec-duration ed
+                                       :delay-ms d})
+                            (Thread/sleep ^long d)
+                            (recur n')))
                       (throw (ex-info "fusebox retries exhausted"
                                       {::fb/error ::err/retries-exhausted
                                        ::num-retries n
@@ -79,9 +84,12 @@
 (defn delay-exp
   "Calculate an exponential delay in millis.
 
+  base        - the base number to scale (default 100)
   retry-count - the number of previous attempts"
-  ^long [retry-count]
-  (long (math/scalb 100 retry-count)))
+  ^long ([retry-count]
+         (long (math/scalb 100 retry-count)))
+  ^long ([base retry-count]
+         (long (math/scalb base retry-count))))
 
 
 (defn delay-linear
