@@ -17,11 +17,12 @@
 
 
 (defn with-fallback* [{fb ::fallback} f]
-  (try (f)
-       (catch Exception e
-         (if fb
-           (fb e)
-           (throw e)))))
+  (if-not fb
+    (f)
+    (try
+      (f)
+      (catch Exception e
+        (fb e)))))
 
 
 (defmacro with-fallback
@@ -31,3 +32,7 @@
 
 
 (defn shutdown [spec])
+
+
+(defn disable [spec]
+  (dissoc spec ::fallback))

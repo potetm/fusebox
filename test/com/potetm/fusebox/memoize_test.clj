@@ -22,4 +22,14 @@
   (testing "invalid args"
     (is (thrown-with-msg? ExceptionInfo
                           #"(?i)invalid"
-                          (memo/init {:some 1})))))
+                          (memo/init {:some 1}))))
+
+  (testing "disable"
+    (let [invokes-count (atom 0)
+          m (memo/disable (memo/init {::memo/fn (fn [i]
+                                                  (swap! invokes-count inc)
+                                                  (+ 3 i))}))]
+      (is (= 4 (memo/get m 1)))
+      (is (= 1 @invokes-count))
+      (is (= 4 (memo/get m 1)))
+      (is (= 2 @invokes-count)))))

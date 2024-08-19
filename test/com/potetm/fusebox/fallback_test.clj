@@ -33,4 +33,11 @@
   (testing "invalid args"
     (is (thrown-with-msg? ExceptionInfo
                           #"(?i)invalid"
-                          (fallback/init {:some 1})))))
+                          (fallback/init {:some 1}))))
+
+  (testing "disable"
+    (let [fallback (fallback/disable (fallback/init {::fallback/fallback (fn [ex]
+                                                                           123)}))]
+      (is (thrown? ExceptionInfo
+                   (fallback/with-fallback fallback
+                     (throw (ex-info "" {}))))))))

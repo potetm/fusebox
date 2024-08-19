@@ -127,3 +127,7 @@
 
 
 (defn shutdown [spec])
+
+
+(defn disable [spec]
+  (dissoc spec ::retry?))

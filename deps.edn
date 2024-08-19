@@ -4,6 +4,7 @@
         org.clojure/tools.logging {:mvn/version "1.3.0"}}
 
  :aliases {:dev {:extra-paths ["dev" "resources-dev" "test" "target/classes"]
+                 :jvm-opts ["-Dlogback.configurationFile=logback-dev.xml"]
                  :extra-deps {nrepl/nrepl {:mvn/version "0.6.0"}
                               org.clojure/test.check {:mvn/version "1.1.1"}
                               io.github.resilience4j/resilience4j-all {:mvn/version "2.2.0"}

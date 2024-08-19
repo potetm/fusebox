@@ -1,9 +1,9 @@
 # Fusebox
-An extremely lightweight fault tolerance library for Clojure
+An extremely lightweight [fault tolerance library](#what-is-a-fault-tolerance-library) for Clojure
 
 ## Current Release
 ```clj
-com.potetm/fusebox {:mvn/version "1.0.3"}
+com.potetm/fusebox {:mvn/version "1.0.4"}
 ```
 
 ## Rationale
@@ -43,6 +43,7 @@ dash of macros, Clojure affords us _much_ simpler implementations.
 * [Usage Notes](#usage-notes)
   * [Pass-through Invocations](#pass-through-invocations)
   * [`init` and `shutdown` Functions](#init-and-shutdown-functions)
+  * [Disabling](#disabling)
   * [spec maps](#spec-maps)
   * [Overriding Values](#overriding-values)
   * [Virtual Threads](#virtual-threads)
@@ -367,9 +368,9 @@ ordering for any combination of utilities.
 
 ## Usage Notes
 ### Pass-through Invocations
-Every utility (except [memoize](#memoize)) is designed to take hashmaps that _don't_
-include the keys that it needs. `nil` is supported as well. In those cases, calling the
-utility is a pass-through. The provided body is executed as-is.
+Every utility  is designed to take hashmaps that _don't_ include the keys that
+it needs. `nil` is supported as well. In those cases, calling the utility is a
+pass-through. The provided body is executed as-is.
 
 This allows you to set up general-purpose functions that properly order your
 resilience utilities and allow individual code paths to opt-in to the functionality
@@ -421,9 +422,33 @@ This is for two reasons:
 For this reason, you should always call `init` and `shutdown`—especially if you're
 just getting started with Fusebox.
 
+
+### Disabling
+Every namespace has a `disable` function that you can use to disable that utility
+for a specific invocation. NOTE: It only disables the utility for _that_ invocation.
+It does not disable the utility for future invocations or across threads.
+
+This is most useful at the REPL. For example, you might be testing a failing call,
+and you don't want to wait for the retries to complete. However, you should feel
+free to use it in production if you find a use case for it.
+
 ### spec maps
-Every `init` returns a hashmap. Internally, these are called specs. These hashmaps
-are not in any way special. They can, and should, be treated as regular hashmaps.
+Every `init` merges in the data it needs. It will not alter the input map, so
+you should feel free to pass extra keys if you see fit:
+
+```clj
+(retry/init {:headers {"authorization" "SUPER_SECRET"}
+             ::retry/retry? (fn [n ms ex]
+                              (< n 10))
+             ::retry/delay (fn [n ms ex]
+                             (min (retry/delay-exp n)
+                                  5000))}
+```
+
+
+Every `init` returns a hashmap. Internally, these are called specs. These
+hashmaps are not in any way special. They can, and should, be treated as regular
+hashmaps.
 
 You can pass them around:
 

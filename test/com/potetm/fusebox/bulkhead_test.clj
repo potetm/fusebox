@@ -44,7 +44,22 @@
 
     (is (= 123
            (bh/with-bulkhead nil
-             123)))))
+             123))))
+
+  (testing "disable"
+    (let [bh (bh/disable (bh/init {::bh/concurrency 2
+                                   ::bh/wait-timeout-ms 100}))
+          res (sort (into []
+                          (map deref)
+                          ;; Need to immediately submit all futures before
+                          ;; resolving any of them.
+                          (into []
+                                (map (fn [i]
+                                       (future (bh/with-bulkhead bh
+                                                 (Thread/sleep 200)
+                                                 ::done!))))
+                                (range 3))))]
+      (is (= [::done! ::done! ::done!] res)))))
 
 
 (comment

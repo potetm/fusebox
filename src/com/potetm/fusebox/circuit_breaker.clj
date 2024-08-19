@@ -303,4 +303,9 @@
   [{cb ::circuit-breaker}]
   @cb)
 
+
 (defn shutdown [spec])
+
+
+(defn disable [spec]
+  (dissoc spec ::circuit-breaker))

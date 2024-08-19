@@ -89,4 +89,16 @@
   (testing "invalid args"
     (is (thrown-with-msg? ExceptionInfo
                           #"(?i)invalid"
-                          (to/init {:foo :bar})))))
+                          (to/init {:foo :bar}))))
+
+  (testing "disable"
+    (let [to (to/init {::to/timeout-ms 5})
+          [t ret] (timing
+                    (try
+                      (to/with-timeout (to/disable to)
+                        (Thread/sleep 100)
+                        :hello!)
+                      (catch ExceptionInfo ei
+                        ::timeout)))]
+      (is (= ret :hello!))
+      (is (< 100 t)))))

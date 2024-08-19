@@ -113,4 +113,18 @@
   (testing "invalid args"
     (is (thrown-with-msg? ExceptionInfo
                           #"(?i)invalid"
-                          (retry/init {::retry/retry? (fn [])})))))
+                          (retry/init {::retry/retry? (fn [])}))))
+
+  (testing "disable"
+    (let [invokes-count (atom 0)
+          retry (retry/disable (retry/init {::retry/retry? (fn [n ms ex]
+                                                             (< n 10))
+                                            ::retry/delay (constantly 1)}))
+          res (try
+                (retry/with-retry retry
+                  (swap! invokes-count inc)
+                  (throw (ex-info "" {})))
+                (catch ExceptionInfo ei
+                  ::fail))]
+      (is (= res ::fail))
+      (is (= 1 @invokes-count)))))

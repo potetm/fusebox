@@ -29,11 +29,17 @@
   "Retrieve a value, invoking ::fn if necessary."
   [{^ConcurrentHashMap chm ::chm
     f ::fn} & args]
-  (.computeIfAbsent chm
-                    args
-                    (reify Function
-                      (apply [this args]
-                        (apply f args)))))
+  (if-not chm
+    (apply f args)
+    (.computeIfAbsent chm
+                      args
+                      (reify Function
+                        (apply [this args]
+                          (apply f args))))))
 
 
 (defn shutdown [_spec])
+
+
+(defn disable [spec]
+  (dissoc spec ::chm))

@@ -205,7 +205,28 @@
   (testing "invalid args"
     (is (thrown-with-msg? ExceptionInfo
                           #"(?i)invalid"
-                          (cb/init {::cb/hist-size 100})))))
+                          (cb/init {::cb/hist-size 100}))))
+
+  (testing "disable"
+    (let [cb (cb/init {::cb/next-state (partial cb/next-state:default
+                                                {:fail-pct 0.5
+                                                 :slow-pct 0.5
+                                                 :wait-for-count 3
+                                                 :open->half-open-after-ms 100})
+                       ::cb/hist-size 10
+                       ::cb/half-open-tries 3
+                       ::cb/slow-call-ms 100})]
+      (dotimes [_ 10]
+        (swallow-ex (cb/with-circuit-breaker (cb/disable cb)
+                      (throw (ex-info "" {})))))
+
+      (is (= 2 (cb/with-circuit-breaker (cb/disable cb)
+                 (+ 1 1))))
+
+      (is (= 2 (cb/with-circuit-breaker cb
+                 (+ 1 1))))
+
+      (is (= 1 (.-total-count (cb/current cb)))))))
 
 
 

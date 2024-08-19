@@ -25,3 +25,13 @@
   (rl/shutdown spec)
   (retry/shutdown spec)
   (to/shutdown spec))
+
+
+(defn disable [spec]
+  (-> spec
+      (bh/disable)
+      (cb/disable)
+      (fallback/disable)
+      (rl/disable)
+      (retry/disable)
+      (to/disable)))

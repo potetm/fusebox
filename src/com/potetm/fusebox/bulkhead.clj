@@ -54,3 +54,7 @@
   ;; Don't allow any more processes to acquire any more permits
   (.drainPermits s)
   nil)
+
+
+(defn disable [spec]
+  (dissoc spec ::sem))

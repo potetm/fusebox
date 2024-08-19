@@ -87,9 +87,5 @@
   nil)
 
 
-(comment
-  (def rl (init {::bucket-size 2
-                 ::period-ms 100
-                 ::wait-timeout-ms 500}))
-  (shutdown rl)
-  )
+(defn disable [spec]
+  (dissoc spec ::sem))

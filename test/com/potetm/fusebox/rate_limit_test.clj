@@ -38,7 +38,24 @@
   (testing "invalid args"
     (is (thrown-with-msg? ExceptionInfo
                           #"(?i)invalid"
-                          (rl/init {::rl/bucket-size 1})))))
+                          (rl/init {::rl/bucket-size 1}))))
+
+  (testing "disable"
+    (let [invokes-count (atom 0)
+          rl (rl/init {::rl/bucket-size 2
+                       ::rl/period-ms 200
+                       ::rl/wait-timeout-ms 500})
+          d (rl/disable rl)]
+      (try
+        (into []
+              (map (fn [i]
+                     (future (rl/with-rate-limit d
+                               (swap! invokes-count inc)))))
+              (range 5))
+        (Thread/sleep 1)
+        (is (= 5 @invokes-count))
+        (finally
+          (rl/shutdown rl))))))
 
 (comment
   @(def rl (rl/init {::rl/bucket-size 2
