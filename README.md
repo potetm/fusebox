@@ -30,7 +30,7 @@ dash of macros, Clojure affords us _much_ simpler implementations.
 
 ## Usage
 ### Table of Contents
-* [What is a Fault Tolerance Library?](#what-is-a-fault-tolerance-libarary)
+* [What is a Fault Tolerance Library?](#what-is-a-fault-tolerance-library)
 * [Bulkhead](#bulkhead)
 * [Circuit Breaker](#circuit-breaker)
 * [Fallback](#fallback)
