@@ -42,14 +42,13 @@
 
 (defonce ^:private
   timeout-threadpool
-  (delay (or util/virtual-exec
-             (Executors/newCachedThreadPool (let [tc (AtomicLong. -1)]
-                                              (reify ThreadFactory
-                                                (newThread [this r]
-                                                  (doto (Thread. r)
-                                                    (.setName (str "fusebox-thread-"
-                                                                   (.incrementAndGet tc)))
-                                                    (.setDaemon true)))))))))
+  (delay (Executors/newCachedThreadPool (let [tc (AtomicLong. -1)]
+                                          (reify ThreadFactory
+                                            (newThread [this r]
+                                              (doto (Thread. r)
+                                                (.setName (str "fusebox-thread-"
+                                                               (.incrementAndGet tc)))
+                                                (.setDaemon true))))))))
 
 
 (defn timeout* [{to ::timeout-ms

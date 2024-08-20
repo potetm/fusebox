@@ -19,7 +19,6 @@ Fusebox was designed to have the following properties:
 * Modular (load only what you need)
 * Linear execution (no callbacks)
 * Use simple, un-nested hashmaps with namespaced keys
-* Prefer Virtual Threads when available
 * One dependency: [clojure/tools.logging](https://github.com/clojure/tools.logging)
 * Support a variety of usage patterns
 
@@ -46,7 +45,6 @@ dash of macros, Clojure affords us _much_ simpler implementations.
   * [Disabling](#disabling)
   * [spec maps](#spec-maps)
   * [Overriding Values](#overriding-values)
-  * [Virtual Threads](#virtual-threads)
   * [Exceptions](#exceptions)
   * [Why `tool.logging`?](#why-toolslogging)
 * [Benchmarks](./docs/benchmarks.md)
@@ -128,11 +126,11 @@ That said, here is a short motivator for each utility:
                     whether it was successful. If false, a `::cb/failure` is
                     recorded. Defaults to `(constantly true)`.
 
-By far, the trickiest part of Fusebox is `::cb/next-state`. It will be run on
-every invocation, so it must be fast. That said, with `cb/next-state:default` should
-work for the vast majority of use cases. In addition, using it as a guide, it's
-straightforward enough to implement a custom `::cb/next-state` function. There are
-a variety of helpers in `com.potetm.fusebox.circuit-breaker` to help you.
+`::cb/next-state` will be run on every invocation, so it must be fast.
+`cb/next-state:default` should work for the vast majority of use cases. Using it
+as a guide, it's straightforward enough to implement a custom `::cb/next-state`
+function. There are a variety of helpers in `com.potetm.fusebox.circuit-breaker`
+to help you.
 
 `cb/next-state:default` takes the following parameters in the first argument:
 
@@ -235,14 +233,14 @@ For example the following spec turns the above rate limiter into a leaky bucket:
                  whether it was successful. If false, body is retried.
                  Defaults to `(constantly true)`.
 
-There are a few in `com.potetm.fusebox.retry` that will help you write a
-`::retry/delay` fn:
+There are a few functions in `com.potetm.fusebox.retry` that will help you write
+a `::retry/delay` fn:
 
-* `delay-exp`
-* `delay-linear`
-* `jitter` — Used in tandem with a base delay, e.g. `(jitter 0.10 (delay-linear 100 count))`
+* `delay-exp` - An exponential delay
+* `delay-linear` - A linear delay
+* `jitter` - Add a random jitter to a base delay, e.g. `(jitter 0.10 (delay-linear 100 count))`
 
-You probably want your `::retry/delay` fn to cap the dlay with a call to `min`
+You probably want your `::retry/delay` fn to cap the delay with a call to `min`
 like so:
 
 ```
@@ -283,8 +281,8 @@ Of course, feel free to macro/wrap to taste.
 ```
 
 * `::timeout-ms` - millis to wait before timing out
-* `::interrupt?` - bool indicated whether a timed-out thread should be interrupted on timeout
-  (Defaults to `true`).
+* `::interrupt?` - bool indicating whether a timed-out thread should be interrupted
+  on timeout (Defaults to `true`).
 
 The timeout namespace also includes a macro `try-interruptible` that you should
 prefer instead of traditional `try` when using `with-timeout`. It guarantees that
@@ -433,8 +431,8 @@ and you don't want to wait for the retries to complete. However, you should feel
 free to use it in production if you find a use case for it.
 
 ### spec maps
-Every `init` merges in the data it needs. It will not alter the input map, so
-you should feel free to pass extra keys if you see fit:
+Every `init` merges in the data it needs. It will not alter other keys in input
+map, so you should feel free to pass extra keys if you see fit:
 
 ```clj
 (retry/init {:headers {"authorization" "SUPER_SECRET"}
@@ -444,7 +442,6 @@ you should feel free to pass extra keys if you see fit:
                              (min (retry/delay-exp n)
                                   5000))}
 ```
-
 
 Every `init` returns a hashmap. Internally, these are called specs. These
 hashmaps are not in any way special. They can, and should, be treated as regular
@@ -545,21 +542,6 @@ Stateless specs are:
 * [Fallback](#fallback)
 * [Retry](#retry)
 * [Timeout](#timeout)
-
-### Virtual Threads
-Fusebox will detect if Virtual Threads are available in your JVM, and if so, it
-will use them. If you AOT your Clojure code, you want to make sure the JVM you
-use to compile is the same as the JVM you use in production. (This is generally
-true, but especially true for Fusebox.)
-
-Virtual Threads should be avoided under certain scenarios (specifically to avoid
-[pinning](https://docs.oracle.com/en/java/javase/21/core/virtual-threads.html#GUID-704A716D-0662-4BC7-8C7F-66EE74B1EDAD)).
-In the unlikely event that your application must make heavy use of `synchronized`
-blocks, you'll want to disable them with the startup flag `-Dfusebox.usePlatformThreads=true`:
-
-```
-clj -J-Dfusebox.usePlatformThreads=true ...
-```
 
 ### Exceptions
 Fusebox only throws `ExceptionInfo`s. All Fusebox exceptions will have `ex-data`
