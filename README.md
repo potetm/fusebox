@@ -17,7 +17,7 @@ Fusebox was designed to have the following properties:
 * [Fast](./docs/benchmarks.md)
 * Prefer pure functions to additional options
 * Modular (load only what you need)
-* Linear execution (no callbacks)
+* Sequential execution (no callbacks)
 * Use simple, un-nested hashmaps with namespaced keys
 * One dependency: [clojure/tools.logging](https://github.com/clojure/tools.logging)
 * Support a variety of usage patterns
