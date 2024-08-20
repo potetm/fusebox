@@ -51,9 +51,9 @@ dash of macros, Clojure affords us _much_ simpler implementations.
 
 ### What is a Fault Tolerance Library?
 A fault tolerance library is a collection of utilities designed to keep your system
-running in the face of latency and errors. They help keep your application up and
-running, _and_ they help ensure that your application doesn't overwhelm another part
-of the system.
+running in the face of latency and errors. Those utilities help keep your application
+up and running, _and_ they help ensure that your application doesn't overwhelm another
+part of the system.
 
 If your application makes or receives network calls, you probably want to be using a
 fault tolerance library.
