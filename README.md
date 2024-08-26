@@ -1,5 +1,5 @@
 # Fusebox
-An extremely lightweight [fault tolerance library](#what-is-a-fault-tolerance-library) for Clojure
+An extremely lightweight [fault tolerance library](#what-is-a-fault-tolerance-library) for Clojure(Script)
 
 ## Current Release
 ```clj
@@ -47,6 +47,7 @@ dash of macros, Clojure affords us _much_ simpler implementations.
   * [Overriding Values](#overriding-values)
   * [Exceptions](#exceptions)
   * [Why `tool.logging`?](#why-toolslogging)
+  * [Clojurescript](#clojurescript)
 * [Benchmarks](./docs/benchmarks.md)
 
 ### What is a Fault Tolerance Library?
@@ -554,6 +555,45 @@ probably want some feedback: In the [retry](#retry) utility, once it's been
 decided that a retry will happen, and it's about to call `Thread/sleep`. The
 only options for getting feedback are: add logging in Fusebox, or add a callback.
 I've opted for the former.
+
+
+### Clojurescript
+Every utility has a corresponding `.cljs.` namespace:
+
+```
+com.potetm.fusebox.cljs.bulkhead
+com.potetm.fusebox.cljs.circuit-breaker
+com.potetm.fusebox.cljs.fallback
+com.potetm.fusebox.cljs.memoize
+com.potetm.fusebox.cljs.rate-limit
+com.potetm.fusebox.cljs.registry
+com.potetm.fusebox.cljs.retry
+com.potetm.fusebox.cljs.timeout
+```
+
+The interface for each utility is identical to its Java counterpart with two
+exceptions.
+
+First, every utility accepts and returns Promises rather than regular forms/fns.
+For example:
+
+```clj
+(-> (retry/with-retry (retry/init {::retry/retry? (fn [n ms ex]
+                                                    (< n 10))
+                                   ::retry/delay (constantly 1)})
+      (js/Promise.resolve :done!))
+    (.then println))
+```
+
+Second, `with-timeout` accepts an optional [AbortController](https://developer.mozilla.org/en-US/docs/Web/API/AbortController)
+that you can pass to `fetch` to properly terminate network calls:
+
+```clj
+(to/with-timeout [abort-controller] (to/init {::to/timeout-ms 1})
+  (js/fetch "https://httpbin.org/delay/1"
+            (js-obj
+              "signal" (.-signal abort-controller))))
+```
 
 ## Acknowledgements
 This library pulls heavily from [Resilience4J](https://resilience4j.readme.io/). I owe

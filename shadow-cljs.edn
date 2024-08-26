@@ -1,0 +1,12 @@
+{:source-paths ["src" "test"]
+ :dependencies []
+ :builds {:browser {:target :browser
+                    :output-dir "target/classes"
+                    :asset-path "target/classes"
+                    :modules {:main {:entries [dev.cljs-test]}}}
+          :node-test {:target :node-test
+                      :output-to "target/classes/fusebox-cljs.js"
+                      :output-dir "target/classes"
+                      :ns-regexp "-test$"
+                      :autorun true}}
+ :dev-http {8000 ["target/classes" "resources-dev"]}}

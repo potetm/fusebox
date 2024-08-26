@@ -4,3 +4,6 @@
 *.iml
 target
 logs
+node_modules
+.shadow-cljs
+*.swp

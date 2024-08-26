@@ -39,11 +39,11 @@
   (fn [_] true))
 
 
-(defn retry* [{succ? ::success?
-               retry? ::retry?
-               delay ::delay
-               :or {succ? always-success} :as spec}
-              f]
+(defn with-retry* [{succ? ::success?
+                    retry? ::retry?
+                    delay ::delay
+                    :or {succ? always-success} :as spec}
+                   f]
   (if-not retry?
     (f nil nil)
     (let [start (System/currentTimeMillis)
@@ -78,8 +78,14 @@
                                        ::num-retries n
                                        ::exec-duration-ms ed
                                        ::fb/spec (util/pretty-spec spec)}
-                                      v))))))))))
+                                      (when (instance? Throwable v)
+                                        v)))))))))))
 
+
+(defn ^:deprecated retry*
+  "DEPRECATED: This was an early mistake. It should have been named with-retry*."
+  [spec f]
+  (with-retry* spec f))
 
 (defn delay-exp
   "Calculate an exponential delay in millis.
@@ -120,10 +126,10 @@
   "Evaluates body, retrying according to the provided retry spec."
   [bindings|spec & [spec|body & body :as b]]
   (if (vector? bindings|spec)
-    `(retry* ~spec|body
-       (fn ~bindings|spec ~@body))
-    `(retry* ~bindings|spec
-       (fn [count# duration#] ~@b))))
+    `(with-retry* ~spec|body
+                  (fn ~bindings|spec ~@body))
+    `(with-retry* ~bindings|spec
+                  (fn [count# duration#] ~@b))))
 
 
 (defn shutdown [spec])

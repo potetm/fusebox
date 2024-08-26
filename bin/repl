@@ -8,4 +8,5 @@ clj \
   -J-Dfusebox.usePlatformThreads=false \
   -J-Dlogback.configurationFile=logback-dev.xml \
   -M:build:dev \
-  -m nrepl.cmdline
+  -m nrepl.cmdline \
+  --middleware "[shadow.cljs.devtools.server.nrepl/middleware]"
