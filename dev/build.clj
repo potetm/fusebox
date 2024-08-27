@@ -10,7 +10,7 @@
 
 
 (def lib 'com.potetm/fusebox)
-(def version "1.0.5") ;; Did you update the README?
+(def version "1.0.6") ;; Did you update the README?
 (def jar-file (str "target/fusebox-" version ".jar"))
 (def sources ["src"])
 (def classes "target/classes")
@@ -21,11 +21,16 @@
 
 
 (defn jar [& _]
+  (b/git-process {:git-args ["tag" version "-a" "-m" (str "version" version)]})
   (b/write-pom {:basis @basis
                 :lib lib
                 :version version
                 :class-dir classes
                 :src-dirs sources
+                :scm {:url "https://github.com/potetm/fusebox"
+                      :connection "scm:git:git://github.com/potetm/fusebox.git"
+                      :developerConnection "scm:git:ssh://git@github.com:potetm/fusebox.git"
+                      :tag version}
                 :pom-data [[:licenses
                             [:license
                              [:name "Eclipse Public License - v 1.0"]
@@ -37,6 +42,7 @@
 
 
 (defn deploy [& _]
+  (b/git-process {:git-args ["push" "origin" "--tags"]})
   (deploy/deploy {:installer :remote
                   :sign-releases? false
                   :artifact jar-file

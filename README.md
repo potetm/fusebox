@@ -3,7 +3,7 @@ An extremely lightweight [fault tolerance library](#what-is-a-fault-tolerance-li
 
 ## Current Release
 ```clj
-com.potetm/fusebox {:mvn/version "1.0.5"}
+com.potetm/fusebox {:mvn/version "1.0.6"}
 ```
 
 ## Rationale
@@ -571,7 +571,7 @@ com.potetm.fusebox.cljs.retry
 com.potetm.fusebox.cljs.timeout
 ```
 
-The interface for each utility is identical to its Java counterpart with two
+The api for each utility is identical to its Java counterpart with two
 exceptions.
 
 First, every utility accepts and returns Promises rather than regular forms/fns.
