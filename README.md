@@ -7,8 +7,11 @@ com.potetm/fusebox {:mvn/version "1.0.7"}
 ```
 
 ## Rationale
-Fault tolerance libraries—both in Java and in Clojure—are heavyweight, have dozens
-of options, are callback-driven, and have extremely complicated execution models.
+Fault tolerance libraries—both in Java and in Clojure—are heavyweight, have
+dozens of options, are callback-driven, and have extremely complicated
+execution models. Javascript appears to have one popular option, but it too is
+option heavy, and it's missing many of the features one would expect of a
+fully-fledged fault tolerance library.
 
 Clojure is a simple language. We deserve a simple resilience library.
 
