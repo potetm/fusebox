@@ -248,26 +248,28 @@
                               succ? ::success? :as spec} f]
   (if-not cb
     (f)
-    (if (allow? spec)
-      (let [start (.getTime (js/Date.))]
-        (-> (f)
-            (.then (fn [ret]
-                     (record! spec
-                              (if (succ? ret)
-                                ::success
-                                ::failure)
-                              (- (.getTime (js/Date.))
-                                 start))
-                     ret))
-            (.catch (fn [e]
-                      (record! spec
-                               ::failure
-                               (- (.getTime (js/Date.))
-                                  start))
-                      (throw e)))))
-      (throw (ex-info "fusebox circuit breaker open"
-                      {:com.potetm.fusebox/error :com.potetm.fusebox.error/circuit-breaker-open
-                       :com.potetm.fusebox/spec (util/pretty-spec spec)})))))
+    (js/Promise.
+      (fn [yes no]
+        (if (allow? spec)
+          (let [start (.getTime (js/Date.))]
+            (yes (-> (f)
+                     (.then (fn [ret]
+                              (record! spec
+                                       (if (succ? ret)
+                                         ::success
+                                         ::failure)
+                                       (- (.getTime (js/Date.))
+                                          start))
+                              ret))
+                     (.catch (fn [e]
+                               (record! spec
+                                        ::failure
+                                        (- (.getTime (js/Date.))
+                                           start))
+                               (throw e))))))
+          (no (ex-info "fusebox circuit breaker open"
+                       {:com.potetm.fusebox/error :com.potetm.fusebox.error/circuit-breaker-open
+                        :com.potetm.fusebox/spec (util/pretty-spec spec)})))))))
 
 
 (defn ^Record current

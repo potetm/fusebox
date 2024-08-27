@@ -2,6 +2,7 @@
   (:require-macros
     com.potetm.fusebox.cljs.retry)
   (:require
+    [clojure.math :as math]
     [com.potetm.fusebox.cljs.util :as util]))
 
 
@@ -72,6 +73,41 @@
                                                     :com.potetm.fusebox/spec (util/pretty-spec spec)}
                                                    err))))))))))]
       (run 0))))
+
+
+(defn delay-exp
+  "Calculate an exponential delay in millis.
+
+  base        - the base number to scale (default 100)
+  retry-count - the number of previous attempts"
+  ^long ([retry-count]
+         (long (math/scalb 100 retry-count)))
+  ^long ([base retry-count]
+         (long (math/scalb base retry-count))))
+
+
+(defn delay-linear
+  "Calculate a linear delay in millis.
+
+  factor      - the linear factor to use
+  retry-count - the number of previous attempts"
+  ^long [factor retry-count]
+  (long (* retry-count
+           factor)))
+
+
+(defn jitter
+  "Randomly jitter a given delay.
+
+  jitter-factor - the decimal jitter percentage, between 0 and 1
+  delay         - the base delay in millis"
+  ^long [jitter-factor delay]
+  (let [jit (long (* jitter-factor
+                     delay))]
+    (+ delay
+       (- (* (math/random)
+             (* 2 jit))
+          jit))))
 
 
 (defn shutdown [spec])

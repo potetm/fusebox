@@ -29,48 +29,48 @@
                                          (map (fn [_]
                                                 (swallow-ex
                                                   (cb/with-circuit-breaker cb
-                                                    (p/wrap #(throw (ex-info "" {})))))
-                                                ))
-                                         (range 4)))]
-          (is (thrown-with-msg? ExceptionInfo
-                                #"fusebox circuit breaker open"
-                                (cb/with-circuit-breaker cb
-                                  (p/resolve (+ 1 1)))))
-
-          (p/await [_ (p/timeout 100)
-                    _ (swallow-ex (cb/with-circuit-breaker cb
+                                                    (p/wrap #(throw (ex-info "" {})))))))
+                                         (range 4)))
+                  _ (-> (cb/with-circuit-breaker cb
+                          (p/resolve (+ 1 1)))
+                        (.catch (fn [e]
+                                  (is (instance? ExceptionInfo e))
+                                  (is (= "fusebox circuit breaker open" (ex-message e))))))
+                  _ (p/timeout 100)
+                  _ (swallow-ex (cb/with-circuit-breaker cb
+                                  (p/wrap #(throw (ex-info "" {})))))]
+          (is (= ::cb/half-opened
+                 (.-state (cb/current cb))))
+          (p/await [_ (swallow-ex (cb/with-circuit-breaker cb
                                     (p/wrap #(throw (ex-info "" {})))))]
             (is (= ::cb/half-opened
                    (.-state (cb/current cb))))
-            (p/await [_ (swallow-ex (cb/with-circuit-breaker cb
-                                      (p/wrap #(throw (ex-info "" {})))))]
-              (is (= ::cb/half-opened
+            (p/await [ret (cb/with-circuit-breaker cb
+                            (p/resolve (+ 1 1)))]
+              (is (= 2 ret))
+              ;; open now because 2/3 half-open calls failed
+              (is (= ::cb/opened
                      (.-state (cb/current cb))))
-              (p/await [ret (cb/with-circuit-breaker cb
+              (p/await [_ (-> (cb/with-circuit-breaker cb
+                                (p/resolve (+ 1 1)))
+                              (.catch (fn [e]
+                                        (is (instance? ExceptionInfo e))
+                                        (is (= "fusebox circuit breaker open" (ex-message e))))))
+                        _ (p/timeout 100)
+                        ret (cb/with-circuit-breaker cb
                               (p/resolve (+ 1 1)))]
                 (is (= 2 ret))
-                ;; open now because 2/3 half-open calls failed
-                (is (= ::cb/opened
+                (is (= ::cb/half-opened
                        (.-state (cb/current cb))))
-                (is (thrown-with-msg? ExceptionInfo
-                                      #"fusebox circuit breaker open"
-                                      (cb/with-circuit-breaker cb
-                                        (+ 1 1))))
-                (p/await [_ (p/timeout 100)
-                          ret (cb/with-circuit-breaker cb
-                                (p/resolve (+ 1 1)))]
-                  (is (= 2 ret))
-                  (is (= ::cb/half-opened
+                (p/await [ret (p/all (into []
+                                           (map (fn [_]
+                                                  (cb/with-circuit-breaker cb
+                                                    (p/resolve (+ 1 1)))))
+                                           (range 2)))]
+                  (is (= (vec ret) [2 2]))
+                  (is (= ::cb/closed
                          (.-state (cb/current cb))))
-                  (p/await [ret (p/all (into []
-                                             (map (fn [_]
-                                                    (cb/with-circuit-breaker cb
-                                                      (p/resolve (+ 1 1)))))
-                                             (range 2)))]
-                    (is (= (vec ret) [2 2]))
-                    (is (= ::cb/closed
-                           (.-state (cb/current cb))))
-                    (done)))))))))))
+                  (done))))))))))
 
 
 (deftest half-open-tries-min
@@ -93,25 +93,26 @@
                                  (map (fn [_]
                                         (swallow-ex (cb/with-circuit-breaker cb
                                                       (p/wrap #(throw (ex-info "" {})))))))
-                                 (range 6)))]
-          (is (thrown-with-msg? ExceptionInfo
-                                #"fusebox circuit breaker open"
-                                (cb/with-circuit-breaker cb
-                                  (+ 1 1))))
-          (p/await [_ (p/timeout 100)
-                    _ (cb/with-circuit-breaker cb
-                        (p/resolve (+ 1 1)))]
-            (is (= ::cb/half-opened
+                                 (range 6)))
+                  _ (-> (cb/with-circuit-breaker cb
+                          (p/resolve (+ 1 1)))
+                        (.catch (fn [e]
+                                  (is (instance? ExceptionInfo e))
+                                  (is (= "fusebox circuit breaker open" (ex-message e))))))
+                  _ (p/timeout 100)
+                  _ (cb/with-circuit-breaker cb
+                      (p/resolve (+ 1 1)))]
+          (is (= ::cb/half-opened
+                 (.-state (cb/current cb))))
+          (p/await [_ (p/all (into []
+                                   (map (fn [_]
+                                          (cb/with-circuit-breaker cb
+                                            (p/resolve (+ 1 1)))))
+                                   (range 2)))]
+            (is (= ::cb/closed
                    (.-state (cb/current cb))))
-            (p/await [_ (p/all (into []
-                                     (map (fn [_]
-                                            (cb/with-circuit-breaker cb
-                                              (p/resolve (+ 1 1)))))
-                                     (range 2)))]
-              (is (= ::cb/closed
-                     (.-state (cb/current cb))))
 
-              (done))))))))
+            (done)))))))
 
 
 (deftest fail-pct-equals-test
@@ -134,11 +135,12 @@
                                  (map (fn [_]
                                         (swallow-ex (cb/with-circuit-breaker cb
                                                       (p/wrap #(throw (ex-info "" {})))))))
-                                 (range 6)))]
-          (is (thrown-with-msg? ExceptionInfo
-                                #"fusebox circuit breaker open"
-                                (cb/with-circuit-breaker cb
-                                  (+ 1 1))))
+                                 (range 6)))
+                  _ (-> (cb/with-circuit-breaker cb
+                          (p/resolve (+ 1 1)))
+                        (.catch (fn [e]
+                                  (is (instance? ExceptionInfo e))
+                                  (is (= "fusebox circuit breaker open" (ex-message e))))))]
           (p/await [_ (p/timeout 100)
                     _ (cb/with-circuit-breaker cb
                         (p/resolve (+ 1 1)))]
@@ -175,11 +177,12 @@
                                  (map (fn [i]
                                         (cb/with-circuit-breaker cb
                                           (p/resolve (inc i)))))
-                                 (range 3)))]
-          (is (thrown-with-msg? ExceptionInfo
-                                #"fusebox circuit breaker open"
-                                (cb/with-circuit-breaker cb
-                                  (+ 1 1))))
+                                 (range 3)))
+                  _ (-> (cb/with-circuit-breaker cb
+                          (p/resolve (+ 1 1)))
+                        (.catch (fn [e]
+                                  (is (instance? ExceptionInfo e))
+                                  (is (= "fusebox circuit breaker open" (ex-message e))))))]
           (done))))))
 
 
@@ -201,11 +204,12 @@
                                           (if (even? i)
                                             (p/timeout 20)
                                             (p/resolve :done)))))
-                                 (range 3)))]
-          (is (thrown-with-msg? ExceptionInfo
-                                #"fusebox circuit breaker open"
-                                (cb/with-circuit-breaker cb
-                                  (p/resolve (+ 1 1)))))
+                                 (range 3)))
+                  _ (-> (cb/with-circuit-breaker cb
+                          (p/resolve (+ 1 1)))
+                        (.catch (fn [e]
+                                  (is (instance? ExceptionInfo e))
+                                  (is (= "fusebox circuit breaker open" (ex-message e))))))]
           (done))))))
 
 
