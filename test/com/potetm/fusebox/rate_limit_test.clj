@@ -24,7 +24,8 @@
         (Thread/sleep 250)
         (is (= 5 @invokes-count))
         (finally
-          (rl/shutdown rl)))))
+          (rl/shutdown rl)
+          (is (.isCancelled (::rl/sched-fut rl)))))))
 
   (testing "noop"
     (is (= 123
@@ -61,5 +62,7 @@
   @(def rl (rl/init {::rl/bucket-size 2
                      ::rl/period-ms 100
                      ::rl/wait-timeout-ms 500}))
+
+  (.isCancelled (::rl/sched-fut rl))
   rl
-  (rl/shutdown *1))
+  (rl/shutdown rl))

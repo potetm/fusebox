@@ -85,7 +85,7 @@
            ::cb/lock
            ::memo/fn
            ::fallback/fallback
-           ::rl/bg-exec
+           ::rl/sched-fut
            ::retry/retry?
            ::retry/delay
            ::retry/success?)))
