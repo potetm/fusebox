@@ -32,6 +32,12 @@ jobs:
           node-version: '18'
           cache: 'npm'
 
+      - name: Cache Clojure dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-clojure-${{ hashFiles('**/shadow-cljs.edn') }}
+
       - name: Install shadow-cljs
         run: npm install shadow-cljs
 
