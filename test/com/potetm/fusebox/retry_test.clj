@@ -118,7 +118,7 @@
       (is (= {:last-val 4}
              (->> result
                   ex-data
-                  ::retry/last-result)))))
+                  ::retry/val)))))
 
   (testing "noop"
     (is (= 123

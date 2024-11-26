@@ -79,7 +79,7 @@
                                           (yes {:some :thing :count (swap! invokes-count inc)}))))]
                       (catch e
                         (is (= {:some :thing :count 5}
-                               (-> (ex-data e) ::retry/last-result)))
+                               (-> (ex-data e) ::retry/val)))
                         (done)))))))
 
 

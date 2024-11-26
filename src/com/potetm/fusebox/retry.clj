@@ -81,7 +81,7 @@
                                                  ::exec-duration-ms ed
                                                  ::fb/spec (util/pretty-spec spec)}
                                           ;; Attach last return value only if it's not an exception
-                                          (not cause) (assoc ::last-result v))
+                                          (not cause) (assoc ::val v))
                                         cause)))))))))))
 
 (defn ^:deprecated retry*
