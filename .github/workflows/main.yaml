@@ -8,14 +8,17 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: Set up Clojure
-        uses: DeLaGuardo/setup-clojure@v2
+        uses: DeLaGuardo/setup-clojure@10.1
         with:
           tools-deps: 'latest'
+          cli: 'latest'
+
       - name: Cache Clojure dependencies
         uses: actions/cache@v3
         with:
           path: ~/.m2/repository
           key: ${{ runner.os }}-clojure-${{ hashFiles('**/deps.edn') }}
+
       - name: Run Clojure tests
         run: clojure -M:dev:test
 
@@ -28,7 +31,9 @@ jobs:
         with:
           node-version: '18'
           cache: 'npm'
+
       - name: Install shadow-cljs
         run: npm install shadow-cljs
+
       - name: Run ClojureScript tests
         run: npx shadow-cljs compile node-test
