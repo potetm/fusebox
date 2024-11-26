@@ -233,12 +233,12 @@ For example the following spec turns the above rate limiter into a leaky bucket:
   * eval-count
   * exec-duration-ms
   * the exception/failing value
-* `::success?` - (Optional) A function which takes a return value and determines
-                 whether it was successful. If false, body is retried.
-                 Defaults to `(constantly true)`.
-                 If the retried code keeps returning non-truthy value, and not
-                 throw exceptions, the last result can be found in the exception's
-                 data under `::retry/val` key.
+* `::retry/success?` - (Optional) A function which takes a return value and determines
+                       whether it was successful. If false, body is retried.
+                       Defaults to `(constantly true)`.
+                       If the retried code keeps returning non-truthy value, and not
+                       throw exceptions, the last result can be found in the exception's
+                       data under `::retry/val` key.
 
 There are a few functions in `com.potetm.fusebox.retry` that will help you write
 a `::retry/delay` fn:
