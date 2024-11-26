@@ -6,15 +6,15 @@ jobs:
   clojure-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Set up Clojure
-        uses: DeLaGuardo/setup-clojure@10.1
+        uses: DeLaGuardo/setup-clojure@13.0
         with:
           tools-deps: 'latest'
           cli: 'latest'
 
       - name: Cache Clojure dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.m2/repository
           key: ${{ runner.os }}-clojure-${{ hashFiles('**/deps.edn') }}
@@ -25,15 +25,15 @@ jobs:
   clojurescript-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
 
       - name: Cache Clojure dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.m2/repository
           key: ${{ runner.os }}-clojure-${{ hashFiles('**/shadow-cljs.edn') }}
