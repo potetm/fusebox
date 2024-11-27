@@ -3,7 +3,7 @@ An extremely lightweight [fault tolerance library](#what-is-a-fault-tolerance-li
 
 ## Current Release
 ```clj
-com.potetm/fusebox {:mvn/version "1.0.8"}
+com.potetm/fusebox {:mvn/version "1.0.9"}
 ```
 
 ## Rationale
