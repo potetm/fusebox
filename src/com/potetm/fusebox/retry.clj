@@ -67,20 +67,22 @@
                       (let [d (delay n'
                                      ed
                                      v)]
-                        (do (log/info "fusebox retrying"
-                                      {:count n'
-                                       :exec-duration ed
-                                       :delay-ms d})
-                            (Thread/sleep ^long d)
-                            (recur n')))
-                      (throw (ex-info "fusebox retries exhausted"
-                                      {::fb/error ::err/retries-exhausted
-                                       ::num-retries n
-                                       ::exec-duration-ms ed
-                                       ::fb/spec (util/pretty-spec spec)}
-                                      (when (instance? Throwable v)
-                                        v)))))))))))
-
+                        (log/info "fusebox retrying"
+                                  {:count n'
+                                   :exec-duration ed
+                                   :delay-ms d})
+                        (Thread/sleep ^long d)
+                        (recur n'))
+                      (let [cause (when (instance? Throwable v)
+                                    v)]
+                        (throw (ex-info "fusebox retries exhausted"
+                                        (cond-> {::fb/error ::err/retries-exhausted
+                                                 ::num-retries n
+                                                 ::exec-duration-ms ed
+                                                 ::fb/spec (util/pretty-spec spec)}
+                                          ;; Attach last return value only if it's not an exception
+                                          (not cause) (assoc ::val v))
+                                        cause)))))))))))
 
 (defn ^:deprecated retry*
   "DEPRECATED: This was an early mistake. It should have been named with-retry*."

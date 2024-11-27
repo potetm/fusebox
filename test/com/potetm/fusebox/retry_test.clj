@@ -100,6 +100,25 @@
           (catch ExceptionInfo ei
             ::fail)))))
 
+  ;; NOTE: this needs to be ported CLJS somehow 🤔
+  (testing "provides last return value when retries are exhausted"
+    (let [counter (atom {:last-val 0})
+          result (try
+                   (retry/with-retry
+                     ;; retry up to 3 times, but never really 'succeed'
+                     (retry/init {::retry/retry? (fn [n _ms _ex]
+                                                   (<= n 3))
+                                  ::retry/delay (constantly 1)
+                                  ::retry/success? (fn [{:keys [last-val]}]
+                                                     (> last-val 5))})
+                     (swap! counter update :last-val inc))
+                   (catch ExceptionInfo ei
+                     ei))]
+
+      (is (= {:last-val 4}
+             (->> result
+                  ex-data
+                  ::retry/val)))))
 
   (testing "noop"
     (is (= 123

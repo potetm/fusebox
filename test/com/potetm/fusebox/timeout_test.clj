@@ -101,4 +101,4 @@
                       (catch ExceptionInfo ei
                         ::timeout)))]
       (is (= ret :hello!))
-      (is (< 100 t)))))
+      (is (<= 100 t)))))

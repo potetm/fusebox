@@ -70,6 +70,7 @@
                                                    {:com.potetm.fusebox/error :com.potetm.fusebox.error/retries-exhausted
                                                     ::num-tries n
                                                     ::exec-duration-ms ed
+                                                    ::val err
                                                     :com.potetm.fusebox/spec (util/pretty-spec spec)}
                                                    err))))))))))]
       (run 0))))

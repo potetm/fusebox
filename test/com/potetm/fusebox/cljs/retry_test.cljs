@@ -65,6 +65,24 @@
           (done))))))
 
 
+(deftest retry-success?-constantly-failing-return-value
+  (testing "when ::retry/success? never succeeds last return value is included"
+    (async done
+           (let [invokes-count (atom 0)]
+             (p/await [ret (retry/with-retry (retry/init {::retry/retry? (fn [n ms ex]
+                                                                           (< n 5))
+                                                          ::retry/delay (constantly 1)
+                                                          ::retry/success? (fn [_]
+                                                                             false)})
+                             (p/promise (fn [yes no]
+
+                                          (yes {:some :thing :count (swap! invokes-count inc)}))))]
+                      (catch e
+                        (is (= {:some :thing :count 5}
+                               (-> (ex-data e) ::retry/val)))
+                        (done)))))))
+
+
 (deftest retry-count-arg
   (testing "retry count arg"
     (async done
