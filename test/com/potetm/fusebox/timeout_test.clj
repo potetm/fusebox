@@ -43,13 +43,15 @@
                     (try
                       (to/with-timeout (to/init {::to/timeout-ms 5})
                         (try
-                          (Thread/sleep 100)
+                          (Thread/sleep 200)
                           (catch InterruptedException ie
                             (vreset! intr? true))))
                       (catch ExceptionInfo ei
                         ::timeout)))]
       (is (= ret ::timeout))
       (is (< t 15))
+      ;; give it a few millis to receive the interrupt
+      (Thread/sleep 5)
       (is (= true @intr?))))
 
 
