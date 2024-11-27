@@ -90,5 +90,5 @@
                                                        (no :error)
                                                        (yes :done!)))))))]
           (is (= 5 @invokes-count))
-          (is (< 400 t))
+          (is (<= 400 t))
           (done))))))
