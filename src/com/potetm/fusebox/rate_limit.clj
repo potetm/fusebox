@@ -67,7 +67,8 @@
                            TimeUnit/MILLISECONDS)
       (throw (ex-info "Timeout waiting for rate limiter"
                       {::fb/error ::err/timeout-waiting-for-rate-limiter
-                       ::fb/spec spec
+                       ::bucket-size (::bucket-size spec)
+                       ::period-ms (::period-ms spec)
                        ::wait-timeout-ms to}))))
   (f))
 

@@ -41,7 +41,7 @@
 (defn with-retry* [{succ? ::success?
                     retry? ::retry?
                     delay ::delay
-                    :or {succ? always-success} :as spec}
+                    :or {succ? always-success}}
                    f]
   (if-not retry?
     (f nil nil)
@@ -70,8 +70,7 @@
                                                    {:com.potetm.fusebox/error :com.potetm.fusebox.error/retries-exhausted
                                                     ::num-tries n
                                                     ::exec-duration-ms ed
-                                                    ::val err
-                                                    :com.potetm.fusebox/spec (util/pretty-spec spec)}
+                                                    ::val err}
                                                    err))))))))))]
       (run 0))))
 

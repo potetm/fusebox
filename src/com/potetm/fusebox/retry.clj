@@ -23,8 +23,9 @@
                  wait prior to the next evaluation. Takes three args:
                  eval-count, exec-duration-ms, and the exception/failing value.
     ::success? - (Optional) A function which takes a return value and determines
-                 whether it was successful. If false, body is retried.
-                 Defaults to (constantly true)."
+                 whether it was successful. If false, body is retried. The last
+                 failing value can be found under the `::retry/val` key in the
+                 thrown ex-info's data. Defaults to (constantly true)."
   [{_r? ::retry?
     _d ::delay :as spec}]
   (util/assert-keys "Retry"
@@ -42,7 +43,7 @@
 (defn with-retry* [{succ? ::success?
                     retry? ::retry?
                     delay ::delay
-                    :or {succ? always-success} :as spec}
+                    :or {succ? always-success}}
                    f]
   (if-not retry?
     (f nil nil)
@@ -78,8 +79,7 @@
                         (throw (ex-info "fusebox retries exhausted"
                                         (cond-> {::fb/error ::err/retries-exhausted
                                                  ::num-retries n
-                                                 ::exec-duration-ms ed
-                                                 ::fb/spec (util/pretty-spec spec)}
+                                                 ::exec-duration-ms ed}
                                           ;; Attach last return value only if it's not an exception
                                           (not cause) (assoc ::val v))
                                         cause)))))))))))

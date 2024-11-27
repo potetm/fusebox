@@ -269,7 +269,9 @@
                                (throw e))))))
           (no (ex-info "fusebox circuit breaker open"
                        {:com.potetm.fusebox/error :com.potetm.fusebox.error/circuit-breaker-open
-                        :com.potetm.fusebox/spec (util/pretty-spec spec)})))))))
+                        ::hist-size (::hist-size spec)
+                        ::half-open-tries (::half-open-tries spec)
+                        ::slow-call-ms (::slow-call-ms spec)})))))))
 
 
 (defn ^Record current

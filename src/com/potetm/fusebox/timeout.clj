@@ -52,7 +52,7 @@
 
 
 (defn timeout* [{to ::timeout-ms
-                 intr? ::interrupt? :as spec}
+                 intr? ::interrupt?}
                 f]
   (if-not to
     (f)
@@ -70,7 +70,7 @@
           (.cancel fut intr?)
           (throw (ex-info "fusebox timeout"
                           {::fb/error ::err/exec-timeout
-                           ::fb/spec (util/pretty-spec spec)})))))))
+                           ::timeout-ms to})))))))
 
 
 (defmacro with-timeout

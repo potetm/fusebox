@@ -13,12 +13,14 @@
     ::concurrency     - the integer number of concurrent callers to allow
     ::wait-timeout-ms - max millis a thread will wait to enter bulkhead"
   [{c ::concurrency
-    _wt ::wait-timeout-ms :as spec}]
+    wt ::wait-timeout-ms :as spec}]
   (util/assert-keys "Bulkhead"
                     {:req-keys [::concurrency
                                 ::wait-timeout-ms]}
                     spec)
-  (merge {::sem (sem/semaphore c)}
+  (merge {::sem (sem/semaphore c
+                               {::concurrency c
+                                ::wait-timeout-ms wt})}
          spec))
 
 

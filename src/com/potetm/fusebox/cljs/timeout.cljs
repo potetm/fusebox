@@ -12,13 +12,12 @@
     ::timeout-ms - millis to wait before timing out"
   [{_to ::timeout-ms :as spec}]
   (util/assert-keys "Timeout"
-                    {:req-keys [::timeout-ms]
-                     :opt-keys [::interrupt?]}
+                    {:req-keys [::timeout-ms]}
                     spec)
   spec)
 
 
-(defn with-timeout* [{to ::timeout-ms :as spec} f]
+(defn with-timeout* [{to ::timeout-ms} f]
   (if-not to
     (f nil)
     (let [ac (js/AbortController.)
@@ -30,7 +29,7 @@
                                                                            (.abort ac)
                                                                            (no (ex-info "fusebox timeout"
                                                                                         {:com.potetm.fusebox/error :com.potetm.fusebox.error/exec-timeout
-                                                                                         :com.potetm.fusebox/spec (util/pretty-spec spec)})))
+                                                                                         ::timeout-ms to})))
                                                                          to))))))
           (.finally (fn []
                       (js/clearTimeout ref)))))))

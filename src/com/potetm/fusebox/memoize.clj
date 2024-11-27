@@ -17,29 +17,31 @@
     ::fn - The function to memoize
 
   ::fn is guaranteed to be called once."
-  [{_fn ::fn :as spec}]
+  [{f ::fn :as spec}]
   (util/assert-keys "Memoize"
                     {:req-keys [::fn]}
                     spec)
-  (merge {::chm (ConcurrentHashMap.)}
-         spec))
+  (let [chm (ConcurrentHashMap.)]
+    (merge {::memo (fn [args]
+                     (.computeIfAbsent chm
+                                       args
+                                       (reify Function
+                                         (apply [this args]
+                                           (apply f args)))))}
+           spec)))
 
 
 (defn get
   "Retrieve a value, invoking ::fn if necessary."
-  [{^ConcurrentHashMap chm ::chm
+  [{memo ::memo
     f ::fn} & args]
-  (if-not chm
+  (if-not memo
     (apply f args)
-    (.computeIfAbsent chm
-                      args
-                      (reify Function
-                        (apply [this args]
-                          (apply f args))))))
+    (memo args)))
 
 
 (defn shutdown [_spec])
 
 
 (defn disable [spec]
-  (dissoc spec ::chm))
+  (dissoc spec ::memo))

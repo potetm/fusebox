@@ -288,7 +288,9 @@
             (throw e))))
       (throw (ex-info "fusebox circuit breaker open"
                       {::fb/error ::err/circuit-breaker-open
-                       ::fb/spec (util/pretty-spec spec)})))))
+                       ::hist-size (::hist-size spec)
+                       ::half-open-tries (::half-open-tries spec)
+                       ::slow-call-ms (::slow-call-ms spec)})))))
 
 
 (defmacro with-circuit-breaker

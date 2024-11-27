@@ -17,13 +17,16 @@
  ::bucket-size to 1 and adjusting ::period-ms accordingly."
   [{n ::bucket-size
     p ::period-ms
-    _to ::wait-timeout-ms :as spec}]
+    to ::wait-timeout-ms :as spec}]
   (util/assert-keys "Rate Limit"
                     {:req-keys [::bucket-size
                                 ::period-ms
                                 ::wait-timeout-ms]}
                     spec)
-  (let [sem (sem/semaphore n)
+  (let [sem (sem/semaphore n
+                           {::bucket-size n
+                            ::period-ms p
+                            ::wait-timeout-ms to})
         interval (js/setInterval (fn []
                                    (sem/release sem
                                                 (- n (.-permits ^sem/Semaphore sem))))

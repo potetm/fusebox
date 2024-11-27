@@ -10,7 +10,7 @@
   (resolve [this]))
 
 
-(deftype Task [yes no ^:mutable pending?]
+(deftype Task [yes no ^:mutable pending? exd]
   ITask
   (resolve [this]
     (when pending?
@@ -20,7 +20,8 @@
     (when pending?
       (set! pending? false)
       (no (ex-info "fusebox timeout"
-                   {:com.potetm.fusebox/error :com.potetm.fusebox.error/exec-timeout})))))
+                   (merge {:com.potetm.fusebox/error :com.potetm.fusebox.error/exec-timeout}
+                          exd))))))
 
 
 (defprotocol ISemaphore
@@ -30,14 +31,14 @@
   (drain [this]))
 
 
-(deftype Semaphore [^:mutable permits ^:mutable tasks]
+(deftype Semaphore [^:mutable permits ^:mutable tasks exd]
   ISemaphore
   (acquire [this timeout-ms]
     (js/Promise. (fn [yes no]
                    (if (pos? permits)
                      (do (set! permits (dec permits))
                          (yes nil))
-                     (let [t (->Task yes no true)]
+                     (let [t (->Task yes no true exd)]
                        (do (set! tasks (conj tasks t))
                            (js/setTimeout (fn []
                                             (reject t))
@@ -68,5 +69,8 @@
     (set! permits 0)))
 
 
-(defn semaphore [permits]
-  (->Semaphore permits #queue[]))
+(defn semaphore
+  ([permits]
+   (->Semaphore permits #queue[] nil))
+  ([permits exd]
+   (->Semaphore permits #queue[] exd)))

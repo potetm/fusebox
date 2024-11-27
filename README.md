@@ -101,6 +101,11 @@ That said, here is a short motivator for each utility:
 * `::bh/concurrency` - the integer number of concurrent callers to allow
 * `::bh/wait-timeout-ms` - max millis a thread will wait to enter bulkhead
 
+#### ex-data keys
+* `::fb/error`
+* `::bh/concurrency`
+* `::bh/wait-timeout-ms`
+
 ### Circuit Breaker
 ```clj
 (require '[com.potetm.fusebox.circuit-breaker :as cb])
@@ -142,6 +147,12 @@ to help you.
 * `:slow-pct` - The decimal threshold to use to open the breaker due to slow calls (0, 1]
 * `:wait-for-count` - The number of calls to wait for after transitioning before transitioning again
 * `:open->half-open-after-ms` - Millis to wait before transitioning from `::opened` to `::half-opened`
+
+#### ex-data keys
+* `::fb/error`
+* `::cb/hist-size`
+* `::cb/half-open-tries`
+* `::cb/slow-call-ms`
 
 ### Fallback
 ```clj
@@ -208,6 +219,12 @@ For example the following spec turns the above rate limiter into a leaky bucket:
  ::rl/wait-timeout-ms 5000}
 ```
 
+#### ex-data keys
+* `::fb/error`
+* `::rl/bucket-size`
+* `::rl/period-ms`
+* `::rl/wait-timeout-ms`
+
 ### Retry
 ```clj
 (require '[com.potetm.fusebox.retry :as retry])
@@ -234,12 +251,9 @@ For example the following spec turns the above rate limiter into a leaky bucket:
   * exec-duration-ms
   * the exception/failing value
 * `::retry/success?` - (Optional) A function which takes a return value and determines
-                       whether it was successful. If false, body is retried.
-                       Defaults to `(constantly true)`.
-                       If the retried code keeps returning non-truthy value, and not
-                       throw exceptions, the last result can be found in the exception's
-                       data under `::retry/val` key.
-
+                       whether it was successful. If false, body is retried. The last
+                       failing value can be found under the `::retry/val` key in the
+                       thrown ex-info's data. Defaults to `(constantly true)`.
 There are a few functions in `com.potetm.fusebox.retry` that will help you write
 a `::retry/delay` fn:
 
@@ -276,6 +290,12 @@ usage in order to preserve [pass-through invocations](#pass-through-invocations)
 
 Of course, feel free to macro/wrap to taste.
 
+#### ex-data keys
+* `::fb/error`
+* `::retry/num-retries`
+* `::retry/exec-duration-ms`
+* `::retry/val` (if using `::retry/success?` and the error was not an exception)
+
 ### Timeout
 ```clj
 (require '[com.potetm.fusebox.timeout :as to])
@@ -287,14 +307,18 @@ Of course, feel free to macro/wrap to taste.
   (run))
 ```
 
-* `::timeout-ms` - millis to wait before timing out
-* `::interrupt?` - bool indicating whether a timed-out thread should be interrupted
+* `::to/timeout-ms` - millis to wait before timing out
+* `::to/interrupt?` - bool indicating whether a timed-out thread should be interrupted
   on timeout (Defaults to `true`).
 
 The timeout namespace also includes a macro `try-interruptible` that you should
 prefer instead of traditional `try` when using `with-timeout`. It guarantees that
 `InterruptedException` is rethrown instead of swallowed, which is the only way to
 stop a thread on the JVM.
+
+#### ex-data keys
+* `::fb/error`
+* `::to/timeout-ms`
 
 ### Register
 ```clj

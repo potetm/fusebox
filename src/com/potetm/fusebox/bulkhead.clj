@@ -40,7 +40,8 @@
 
     :else (throw (ex-info "fusebox timeout"
                           {::fb/error ::err/timeout-waiting-for-bulkhead
-                           ::fb/spec (util/pretty-spec spec)}))))
+                           ::concurrency (::concurrency spec)
+                           ::wait-timeout-ms to}))))
 
 
 (defmacro with-bulkhead

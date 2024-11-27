@@ -74,18 +74,3 @@
        (catch InterruptedException ie#
          (throw ie#))
        ~@catches+finally)))
-
-
-(defn pretty-spec
-  ([spec]
-   (dissoc spec
-           ::cb/circuit-breaker
-           ::cb/next-state
-           ::cb/success?
-           ::cb/lock
-           ::memo/fn
-           ::fallback/fallback
-           ::rl/sched-fut
-           ::retry/retry?
-           ::retry/delay
-           ::retry/success?)))
