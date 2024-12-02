@@ -254,6 +254,7 @@ For example the following spec turns the above rate limiter into a leaky bucket:
                        whether it was successful. If false, body is retried. The last
                        failing value can be found under the `::retry/val` key in the
                        thrown ex-info's data. Defaults to `(constantly true)`.
+
 There are a few functions in `com.potetm.fusebox.retry` that will help you write
 a `::retry/delay` fn:
 
