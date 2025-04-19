@@ -257,7 +257,7 @@ For example the following spec turns the above rate limiter into a leaky bucket:
 * `::retry/exception` - (Optional) A function which returns the exception to throw once
                         `::retry?` returns `false`. Defaults to an `ExceptionInfo` with fusebox
                         ex-data and the last exception as the cause. See also
-                        ```wrap-ex-after-retry`` and ```no-wrap-ex``. Takes three args:
+                        `wrap-ex-after-retry` and `no-wrap-ex`. Takes three args:
                         eval-count, exec-duration-ms, and the exception/failing value.
 
 There are a few functions in `com.potetm.fusebox.retry` that will help you write
