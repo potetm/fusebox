@@ -57,7 +57,7 @@
   (if-not to
     (f)
     (let [fut (.submit ^ExecutorService @timeout-threadpool
-                       ^Callable (util/convey-bindings f))]
+                       ^Callable (bound-fn* f))]
       (try
         (.get fut
               to

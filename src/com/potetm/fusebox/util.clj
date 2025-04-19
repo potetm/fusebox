@@ -50,13 +50,6 @@
                              {:missing-keys ks'}))))))
 
 
-(defn convey-bindings [f]
-  (let [binds (Var/getThreadBindingFrame)]
-    (fn []
-      (Var/resetThreadBindingFrame binds)
-      (f))))
-
-
 (defmacro try-interruptible
   "Guarantees that an InterruptedException will be immediately rethrown.
 

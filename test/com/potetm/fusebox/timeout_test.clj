@@ -25,6 +25,17 @@
       (is (< t 15))))
 
 
+  (testing "success case"
+    (let [[t ret] (timing
+                    (try
+                      (to/with-timeout (to/init {::to/timeout-ms 500})
+                        (Thread/sleep 100)
+                        :hello!)
+                      (catch ExceptionInfo ei
+                        ::timeout)))]
+      (is (= ret :hello!))))
+
+
   (testing "base case - no sleeping"
     (let [[t ret] (timing
                     (try

@@ -228,7 +228,7 @@
         hist-size (::hist-size spec)
         scms (::slow-call-ms spec)]
     (locking l
-      (let [^Record cb (.deref cba)]
+      (let [^Record cb (deref cba)]
         (vreset! cba
                  (let [r (.-record cb)
                        i (.-record-idx cb)
