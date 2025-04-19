@@ -68,19 +68,19 @@
 (deftest retry-success?-constantly-failing-return-value
   (testing "when ::retry/success? never succeeds last return value is included"
     (async done
-           (let [invokes-count (atom 0)]
-             (p/await [ret (retry/with-retry (retry/init {::retry/retry? (fn [n ms ex]
-                                                                           (< n 5))
-                                                          ::retry/delay (constantly 1)
-                                                          ::retry/success? (fn [_]
-                                                                             false)})
-                             (p/promise (fn [yes no]
+      (let [invokes-count (atom 0)]
+        (p/await [ret (retry/with-retry (retry/init {::retry/retry? (fn [n ms ex]
+                                                                      (< n 5))
+                                                     ::retry/delay (constantly 1)
+                                                     ::retry/success? (fn [_]
+                                                                        false)})
+                        (p/promise (fn [yes no]
 
-                                          (yes {:some :thing :count (swap! invokes-count inc)}))))]
-                      (catch e
-                        (is (= {:some :thing :count 5}
-                               (-> (ex-data e) ::retry/val)))
-                        (done)))))))
+                                     (yes {:some :thing :count (swap! invokes-count inc)}))))]
+          (catch e
+                 (is (= {:some :thing :count 5}
+                        (-> (ex-data e) ::retry/val)))
+            (done)))))))
 
 
 (deftest retry-count-arg
@@ -121,6 +121,81 @@
                                    (no))))]
           (catch e
                  (done)))))))
+
+
+(deftest wrap-ex-after-retry
+  (testing "wrap-ex-after-retry"
+    (async done
+      (p/await [_ (retry/with-retry [c edm]
+                    (retry/init {::retry/retry? (constantly false)
+                                 ::retry/delay (constantly 1)
+                                 ::retry/exception retry/wrap-ex-after-retry})
+                    (p/promise (fn [yes no]
+                                 (no (js/Error "no")))))]
+        (catch e
+               (is (not (instance? ExceptionInfo e)))
+          (done))))))
+
+
+(deftest wrap-ex-after-retry:no-wrap-vals
+  (testing "wrap-ex-after-retry"
+    (async done
+      (p/await [_ (retry/with-retry [c edm]
+                    (retry/init {::retry/retry? (constantly false)
+                                 ::retry/delay (constantly 1)
+                                 ::retry/success? (constantly false)
+                                 ::retry/exception retry/wrap-ex-after-retry})
+                    (p/promise (fn [yes no]
+                                 (no :no))))]
+        (catch e
+               (is (instance? ExceptionInfo e))
+          (done))))))
+
+
+(deftest wrap-ex-after-retry:multiple-throws-wrap-exception
+  (testing "wrap-ex-after-retry: multiple throws wraps the exception"
+    (async done
+      (p/await [_ (retry/with-retry [c edm]
+                    (retry/init {::retry/retry? (fn [n ms ex]
+                                                  (< n 2))
+                                 ::retry/delay (constantly 1)
+                                 ::retry/exception retry/wrap-ex-after-retry})
+                    (p/promise (fn [yes no]
+                                 (no (js/Error "no")))))]
+        (catch e
+               (is (instance? ExceptionInfo e))
+          (done))))))
+
+
+(deftest no-wrap-ex:multiple-throws-does-not-wrap-exception
+  (testing "wrap-ex-after-retry: multiple throws does not wraps the exception"
+    (async done
+      (p/await [_ (retry/with-retry [c edm]
+                    (retry/init {::retry/retry? (fn [n ms ex]
+                                                  (< n 5))
+                                 ::retry/delay (constantly 1)
+                                 ::retry/exception retry/no-wrap-ex})
+                    (p/promise (fn [yes no]
+                                 (no (js/Error "no")))))]
+        (catch e
+               (is (not (instance? ExceptionInfo e)))
+          (done))))))
+
+
+(deftest no-wrap-ex:val-is-not-wrapped
+  (testing "wrap-ex-after-retry: multiple throws does not wraps the exception"
+    (async done
+      (p/await [_ (retry/with-retry [c edm]
+                    (retry/init {::retry/retry? (fn [n ms ex]
+                                                  (< n 2))
+                                 ::retry/delay (constantly 1)
+                                 ::retry/success? (constantly false)
+                                 ::retry/exception retry/no-wrap-ex})
+                    (p/promise (fn [yes no]
+                                 (no ::no))))]
+        (catch e
+               (is (instance? ExceptionInfo e))
+          (done))))))
 
 
 (deftest noop

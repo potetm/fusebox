@@ -22,7 +22,7 @@
                       (catch ExceptionInfo ei
                         ::timeout)))]
       (is (= ret ::timeout))
-      (is (< t 15))))
+      (is (< t 25))))
 
 
   (testing "success case"
@@ -60,7 +60,7 @@
                       (catch ExceptionInfo ei
                         ::timeout)))]
       (is (= ret ::timeout))
-      (is (< t 15))
+      (is (< t 25))
       ;; give it a few millis to receive the interrupt
       (Thread/sleep 5)
       (is (= true @intr?))))

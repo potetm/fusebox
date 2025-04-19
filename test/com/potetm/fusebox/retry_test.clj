@@ -120,6 +120,56 @@
                   ex-data
                   ::retry/val)))))
 
+
+  (testing "wrap-ex-after-retry"
+    (is (thrown? IllegalArgumentException
+                 (retry/with-retry
+                   (retry/init {::retry/retry? (constantly false)
+                                ::retry/delay (constantly 1)
+                                ::retry/exception retry/wrap-ex-after-retry})
+                   (throw (IllegalArgumentException.))))))
+
+
+  (testing "wrap-ex-after-retry: wraps the exception if val isn't an exception"
+    (is (thrown? ExceptionInfo
+                 (retry/with-retry
+                   (retry/init {::retry/retry? (constantly false)
+                                ::retry/delay (constantly 1)
+                                ::retry/success? (constantly false)
+                                ::retry/exception retry/wrap-ex-after-retry})
+                   ::abc))))
+
+
+  (testing "wrap-ex-after-retry: multiple throws wraps the exception"
+    (is (thrown? ExceptionInfo
+                 (retry/with-retry
+                   (retry/init {::retry/retry? (fn [n _ms _ex]
+                                                 (< n 2))
+                                ::retry/delay (constantly 1)
+                                ::retry/exception retry/wrap-ex-after-retry})
+                   (throw (RuntimeException.))))))
+
+
+  (testing "no-wrap-ex: multiple throws doesn't wrap the exception"
+    (is (thrown? IllegalArgumentException
+                 (retry/with-retry
+                   (retry/init {::retry/retry? (fn [n _ms _ex]
+                                                 (< n 6))
+                                ::retry/delay (constantly 1)
+                                ::retry/exception retry/no-wrap-ex})
+                   (throw (IllegalArgumentException.))))))
+
+
+  (testing "no-wrap-ex: exception is wrapped if val isn't an exception"
+    (is (thrown? ExceptionInfo
+                 (retry/with-retry
+                   (retry/init {::retry/retry? (constantly false)
+                                ::retry/delay (constantly 1)
+                                ::retry/success? (constantly false)
+                                ::retry/exception retry/no-wrap-ex})
+                   :abc))))
+
+
   (testing "noop"
     (is (= 123
            (retry/with-retry {:something 'else}

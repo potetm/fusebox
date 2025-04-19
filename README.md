@@ -254,6 +254,11 @@ For example the following spec turns the above rate limiter into a leaky bucket:
                        whether it was successful. If false, body is retried. The last
                        failing value can be found under the `::retry/val` key in the
                        thrown ex-info's data. Defaults to `(constantly true)`.
+* `::retry/exception` - (Optional) A function which returns the exception to throw once
+                        `::retry?` returns `false`. Defaults to an `ExceptionInfo` with fusebox
+                        ex-data and the last exception as the cause. See also
+                        ```wrap-ex-after-retry`` and ```no-wrap-ex``. Takes three args:
+                        eval-count, exec-duration-ms, and the exception/failing value.
 
 There are a few functions in `com.potetm.fusebox.retry` that will help you write
 a `::retry/delay` fn:
@@ -270,6 +275,17 @@ like so:
         (min (delay-exp 100 count)
              10000))
 ```
+
+By default, retry will wrap any exception with an `ExceptionInfo`. If you wish
+to change this behavior, supply a `::retry/exception` function. There are three
+examples of exception functions in the `com.potetm.fusebox.retry` namespace:
+
+* `default-ex` - The default ::exception fn. Always returns an ExceptionInfo with fusebox
+                 ex-data and the last exception as the cause.
+* `wrap-ex-after-retry` - An ::exception fn. Only wraps with an ExceptionInfo if a retry was attempted
+                          or if the failing value was not an Exception (i.e. ::success? returned false).
+* `no-wrap-ex` - An ::exception fn. Only wraps with an if the failing value was not an
+                 Exception (i.e. ::success? returned false).
 
 To aid in diagnostic feedback, you can optionally insert bindings for:
 

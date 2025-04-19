@@ -19,15 +19,21 @@
   "Initialize a retry.
 
   spec is map containing:
-    ::retry?   - A predicate called after an exception to determine
-                 whether body should be retried. Takes three args:
-                 eval-count, exec-duration-ms, and the exception/failing value.
-    ::delay    - A function which calculates the delay in millis to
-                 wait prior to the next evaluation. Takes three args:
-                 eval-count, exec-duration-ms, and the exception/failing value.
-    ::success? - (Optional) A function which takes a return value and determines
-                 whether it was successful. If false, body is retried.
-                 Defaults to (constantly true)."
+    ::retry?    - A predicate called after an exception to determine
+                  whether body should be retried. Takes three args:
+                  eval-count, exec-duration-ms, and the exception/failing value.
+    ::delay     - A function which calculates the delay in millis to
+                  wait prior to the next evaluation. Takes three args:
+                  eval-count, exec-duration-ms, and the exception/failing value.
+    ::success?  - (Optional) A function which takes a return value and determines
+                  whether it was successful. If false, body is retried. The last
+                  failing value can be found under the `::retry/val` key in the
+                  thrown ex-info's data. Defaults to (constantly true).
+    ::exception - (Optional) A function which returns the exception to throw once
+                  ::retry? returns false. Defaults to an ExceptionInfo with fusebox
+                  ex-data and the last exception as the cause. See also
+                  `wrap-ex-after-retry and `no-wrap-ex. Takes three args:
+                  eval-count, exec-duration-ms, and the exception/failing value."
   [{_r? ::retry?
     _d ::delay :as spec}]
   (util/assert-keys "Retry"
@@ -38,10 +44,43 @@
   spec)
 
 
+(defn default-ex
+  "The default ::exception fn. Always returns an ExceptionInfo with fusebox
+  ex-data and the last exception as the cause."
+  [n ed v]
+  (ex-info "fusebox retries exhausted"
+           {:com.potetm.fusebox/error :com.potetm.fusebox.error/retries-exhausted
+            ::num-tries n
+            ::exec-duration-ms ed
+            ::val v}
+           v))
+
+
+(defn wrap-ex-after-retry
+  "An ::exception fn. Only wraps with an ExceptionInfo if a retry was attempted
+  or if the failing value was not an Exception (i.e. ::success? returned false)."
+  [n ed v]
+  (if (and (zero? n)
+           (instance? js/Error v))
+    v
+    (default-ex n ed v)))
+
+
+(defn no-wrap-ex
+  "An ::exception fn. Only wraps with an if the failing value was not an
+  Exception (i.e. ::success? returned false)."
+  [n ed v]
+  (if (instance? js/Error v)
+    v
+    (default-ex n ed v)))
+
+
 (defn with-retry* [{succ? ::success?
                     retry? ::retry?
                     delay ::delay
-                    :or {succ? always-success}}
+                    exception ::exception
+                    :or {succ? always-success
+                         exception default-ex}}
                    f]
   (if-not retry?
     (f nil nil)
@@ -66,12 +105,7 @@
                                           (.then #(run (inc n)))
                                           (.then yes)
                                           (.catch no))
-                                      (no (ex-info "fusebox retries exhausted"
-                                                   {:com.potetm.fusebox/error :com.potetm.fusebox.error/retries-exhausted
-                                                    ::num-tries n
-                                                    ::exec-duration-ms ed
-                                                    ::val err}
-                                                   err))))))))))]
+                                      (no (exception n ed err))))))))))]
       (run 0))))
 
 
