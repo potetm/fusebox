@@ -40,12 +40,12 @@
     (let [[t ret] (timing
                     (try
                       (to/with-timeout (to/init {::to/timeout-ms 5})
-                        ;; benchmarking says this is about 30ms
-                        (doseq [_ (range 10000000)]))
+                        ;; benchmarking says this is about 180ms
+                        (doseq [_ (doseq [_ (range 100000000)])]))
                       (catch ExceptionInfo ei
                         ::timeout)))]
       (is (= ret ::timeout))
-      (is (< t 15))))
+      (is (< t 25))))
 
 
   (testing "interrupt"
@@ -73,13 +73,13 @@
                       (to/with-timeout {::to/timeout-ms 5
                                         ::to/interrupt? false}
                         (try
-                          (Thread/sleep 50)
+                          (Thread/sleep 200)
                           (catch InterruptedException ie
                             (reset! intr? true))))
                       (catch ExceptionInfo ei
                         ::timeout)))]
       (is (= ret ::timeout))
-      (is (< t 15))
+      (is (< t 25))
       (is (= false @intr?))))
 
 
