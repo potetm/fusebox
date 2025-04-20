@@ -1,42 +1,34 @@
 (ns com.potetm.fusebox.util
-  (:require
-    [com.potetm.fusebox.bulkhead :as-alias bh]
-    [com.potetm.fusebox.circuit-breaker :as-alias cb]
-    [com.potetm.fusebox.fallback :as-alias fallback]
-    [com.potetm.fusebox.memoize :as-alias memo]
-    [com.potetm.fusebox.rate-limit :as-alias rl]
-    [com.potetm.fusebox.retry :as-alias retry]
-    [com.potetm.fusebox.timeout :as-alias to])
   (:import
-    (clojure.lang Var)
     (java.util.concurrent ExecutorService)))
 
 
 (set! *warn-on-reflection* true)
 
 
-(defn class-for-name [n]
-  (try
-    (Class/forName n)
-    (catch ClassNotFoundException _)))
+(comment
+  (defn class-for-name [n]
+    (try
+      (Class/forName n)
+      (catch ClassNotFoundException _)))
 
 
-(defn platform-threads? []
-  (boolean (when-some [v (System/getProperty "fusebox.usePlatformThreads")]
-             (parse-boolean v))))
+  (defn platform-threads? []
+    (boolean (when-some [v (System/getProperty "fusebox.usePlatformThreads")]
+               (parse-boolean v))))
 
 
-;; No point in allocating a new virtual executor on every invocation. It will
-;; always spawn a new thread per task, so might as well share the startup
-;; overhead AND allow people to precompile without eval.
-(def ^ExecutorService
-  virtual-exec
-  (when (and (not (platform-threads?))
-             (class-for-name "java.lang.VirtualThread"))
-    (eval '(java.util.concurrent.Executors/newThreadPerTaskExecutor
-             (-> (Thread/ofVirtual)
-                 (.name "fusebox-thread-" 1)
-                 (.factory))))))
+  ;; No point in allocating a new virtual executor on every invocation. It will
+  ;; always spawn a new thread per task, so might as well share the startup
+  ;; overhead AND allow people to precompile without eval.
+  (def ^ExecutorService
+    virtual-exec
+    (when (and (not (platform-threads?))
+               (class-for-name "java.lang.VirtualThread"))
+      (eval '(java.util.concurrent.Executors/newThreadPerTaskExecutor
+               (-> (Thread/ofVirtual)
+                   (.name "fusebox-thread-" 1)
+                   (.factory)))))))
 
 
 (defn assert-keys [n {req :req-keys :as deets} spec]

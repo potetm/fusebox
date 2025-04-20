@@ -8,6 +8,9 @@
     [com.potetm.fusebox.timeout :as to]))
 
 
+(set! *warn-on-reflection* true)
+
+
 (defmacro bulwark [spec & body]
   `(fallback/with-fallback ~spec
      (retry/with-retry ~spec

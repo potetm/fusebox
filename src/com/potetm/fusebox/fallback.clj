@@ -3,6 +3,9 @@
     [com.potetm.fusebox.util :as util]))
 
 
+(set! *warn-on-reflection* true)
+
+
 (defn init
   "Initialize a fallback
 

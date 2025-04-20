@@ -4,6 +4,9 @@
     [clojure.core :as cc]))
 
 
+(set! *warn-on-reflection* true)
+
+
 (def registry
   (atom {}))
 

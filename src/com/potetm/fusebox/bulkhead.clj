@@ -8,6 +8,9 @@
                           TimeUnit)))
 
 
+(set! *warn-on-reflection* true)
+
+
 (defn init
   "Initialize a bulkhead (i.e. concurrency limiter).
 
