@@ -1,4 +1,12 @@
 # Changelog
+## 1.0.10
+### Enhancements
+* The exception thrown after retries are exhausted may now be controlled via
+  the `::retry/exception` option. See docstring for `retry/init` for details.
+  Thanks to @mk for reporting!
+* Fusebox now runs on Babashka (except for timeouts. Pending a [sci patch](https://github.com/babashka/sci/issues/959)
+  to make timeouts work properly). Thanks to @borkdude for his help!
+
 ## 1.0.9
 ### Enhancements
 * Retry exceptions now include the last failing value under `::retry/val`. See
