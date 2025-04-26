@@ -1,5 +1,5 @@
 # Fusebox
-An extremely lightweight [fault tolerance library](#what-is-a-fault-tolerance-library) for Clojure(Script)
+An extremely lightweight [fault tolerance library](#what-is-a-fault-tolerance-library) for Clojure(Script) and Babashka
 
 ## Current Release
 ```clj
