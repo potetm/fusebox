@@ -18,6 +18,7 @@
                      (future (rl/with-rate-limit rl
                                (swap! invokes-count inc)))))
               (range 5))
+        (Thread/sleep 1) ;; bb needs one tick to allow futures to work
         (is (= 2 @invokes-count))
         (Thread/sleep 250)
         (is (= 4 @invokes-count))

@@ -2,4 +2,4 @@
 
 cd "$(dirname "$0")/.."
 
-clj -X:dev:test && shadow-cljs compile node-test
+clj -X:dev:test && shadow-cljs compile node-test && bb test:bb
