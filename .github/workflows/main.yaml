@@ -43,3 +43,20 @@ jobs:
 
       - name: Run ClojureScript tests
         run: npx shadow-cljs compile node-test
+
+  babashka-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeLaGuardo/setup-clojure@13.0
+        with:
+          bb: 'latest'
+
+      - name: Cache Clojure dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-clojure-${{ hashFiles('**/deps.edn') }}
+
+      - name: Run bb tests
+        run: bb test:bb

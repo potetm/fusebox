@@ -51,13 +51,15 @@
                                                 (.setDaemon true))))))))
 
 
+(def ^:private binding-conveyor-fn* @#'clojure.core/binding-conveyor-fn)
+
 (defn timeout* [{to ::timeout-ms
                  intr? ::interrupt?}
                 f]
   (if-not to
     (f)
     (let [fut (.submit ^ExecutorService @timeout-threadpool
-                       ^Callable (bound-fn* f))]
+                       ^Callable (binding-conveyor-fn* f))]
       (try
         (.get fut
               to
