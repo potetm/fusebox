@@ -115,3 +115,26 @@
                         ::timeout)))]
       (is (= ret :hello!))
       (is (<= 100 t)))))
+
+
+(def ^:dynamic *dynavar*)
+
+
+(deftest dynamic-var-changes
+  (testing "timeout threads can see changes to dynamic vars"
+    (binding [*dynavar* :init]
+      (let [wait (promise)
+            ret (promise)]
+
+        ;; Triggering this is tricky. Kick off a thread, do NOT interrupt,
+        ;; let it  timeout so we regain control in the parent thread,
+        ;; *then* do our updates.
+        (try (to/with-timeout {::to/timeout-ms 1
+                               ::to/interrupt? false}
+               @wait
+               (deliver ret *dynavar*))
+             (catch ExceptionInfo _))
+
+        (set! *dynavar* :new)
+        (deliver wait nil)
+        (is (= @ret :new))))))

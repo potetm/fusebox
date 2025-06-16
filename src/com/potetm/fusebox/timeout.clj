@@ -4,6 +4,7 @@
     [com.potetm.fusebox.error :as-alias err]
     [com.potetm.fusebox.util :as util])
   (:import
+    (clojure.lang Var)
     (java.util.concurrent ExecutorService
                           Executors
                           ThreadFactory
@@ -51,27 +52,12 @@
                                                 (.setDaemon true))))))))
 
 
-(defn- binding-conveyor-fn
-  {:private true
-   :added "1.3"}
-  [f]
-  (let [frame (clojure.lang.Var/cloneThreadBindingFrame)]
-    (fn
-      ([]
-       (clojure.lang.Var/resetThreadBindingFrame frame)
-       (f))
-      ([x]
-       (clojure.lang.Var/resetThreadBindingFrame frame)
-       (f x))
-      ([x y]
-       (clojure.lang.Var/resetThreadBindingFrame frame)
-       (f x y))
-      ([x y z]
-       (clojure.lang.Var/resetThreadBindingFrame frame)
-       (f x y z))
-      ([x y z & args]
-       (clojure.lang.Var/resetThreadBindingFrame frame)
-       (apply f x y z args)))))
+(defn binding-conveyor-fn [f]
+  (let [frame (Var/cloneThreadBindingFrame)]
+    (fn []
+      (Var/resetThreadBindingFrame frame)
+      (f))))
+
 
 (defn timeout* [{to ::timeout-ms
                  intr? ::interrupt?}
