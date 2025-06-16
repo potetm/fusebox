@@ -51,7 +51,27 @@
                                                 (.setDaemon true))))))))
 
 
-(def ^:private binding-conveyor-fn* @#'clojure.core/binding-conveyor-fn)
+(defn- binding-conveyor-fn
+  {:private true
+   :added "1.3"}
+  [f]
+  (let [frame (clojure.lang.Var/cloneThreadBindingFrame)]
+    (fn
+      ([]
+       (clojure.lang.Var/resetThreadBindingFrame frame)
+       (f))
+      ([x]
+       (clojure.lang.Var/resetThreadBindingFrame frame)
+       (f x))
+      ([x y]
+       (clojure.lang.Var/resetThreadBindingFrame frame)
+       (f x y))
+      ([x y z]
+       (clojure.lang.Var/resetThreadBindingFrame frame)
+       (f x y z))
+      ([x y z & args]
+       (clojure.lang.Var/resetThreadBindingFrame frame)
+       (apply f x y z args)))))
 
 (defn timeout* [{to ::timeout-ms
                  intr? ::interrupt?}
@@ -59,7 +79,7 @@
   (if-not to
     (f)
     (let [fut (.submit ^ExecutorService @timeout-threadpool
-                       ^Callable (binding-conveyor-fn* f))]
+                       ^Callable (binding-conveyor-fn f))]
       (try
         (.get fut
               to
