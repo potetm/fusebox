@@ -1,4 +1,8 @@
 # Changelog
+## 1.0.11
+### Fixes
+* Timeout threads can now see changes to dynamic vars. (Broken in 1.0.10.)
+
 ## 1.0.10
 ### Enhancements
 * The exception thrown after retries are exhausted may now be controlled via
